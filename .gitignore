@@ -1,0 +1,70 @@
+# Secrets — never upload
+服务器地址和密码
+*密码*
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+.env
+.env.*
+credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*~
+
+# MD trajectories and restart files (hundreds of GB)
+*.xtc
+*.trr
+*.edr
+*.cpt
+*.tpr
+*.gro
+\#*
+*.pdb.bck
+
+# Keep small input structures
+!**/structures/**
+!**/structures/**/*.pdb
+!**/gmx_common*/protein.gro
+!**/gmx_common*/posre.itp
+!**/gmx_common*/topol.top
+
+# Runtime / derived
+logs/
+**/logs/
+analysis/
+**/analysis/
+results/
+**/adaptive/
+**/scratch*/
+**/runs/
+*.log
+*.npz
+*.npy
+*.xvg
+*.ndx
+mdout.mdp
+
+# Large local-only trees
+**/water_open/
+**/water_closed/
+**/water/
+**/vacuum/
+**/legacy/
+
+# Keep topology and MDP templates that live outside water boxes
+!**/shared/
+!**/shared/**/*.mdp
+!**/mdp/
+!**/mdp/**/*.mdp

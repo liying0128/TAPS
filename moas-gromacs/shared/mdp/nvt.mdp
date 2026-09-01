@@ -1,0 +1,39 @@
+; NVT equilibration (explicit solvent)
+define                   = -DPOSRES
+integrator               = md
+dt                       = 0.002
+nsteps                   = 500000         ; 1 ns
+nstlog                   = 5000
+nstenergy                = 5000
+nstxout-compressed       = 5000
+compressed-x-precision   = 1000
+
+cutoff-scheme            = Verlet
+nstlist                  = 20
+coulombtype              = PME
+rcoulomb                 = 1.0
+vdwtype                  = Cut-off
+rvdw                     = 1.0
+DispCorr                 = EnerPres
+pbc                      = xyz
+
+tcoupl                   = v-rescale
+tc-grps                  = Protein Non-Protein
+tau-t                    = 0.1     0.1
+ref-t                    = 300     300
+
+pcoupl                   = no
+
+constraints              = h-bonds
+constraint-algorithm     = lincs
+lincs-iter               = 1
+lincs-order              = 4
+
+gen-vel                  = yes
+gen-temp                 = 300
+gen-seed                 = -1
+continuation             = no
+
+nstcomm                  = 100
+comm-mode                = Linear
+comm-grps                = Protein Non-Protein

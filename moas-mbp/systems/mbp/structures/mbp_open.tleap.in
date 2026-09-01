@@ -1,0 +1,4 @@
+source leaprc.protein.ff14SB
+p = loadPdb /home/ly/TAPS/moas-mbp/systems/mbp/structures/mbp_open_stub_leapin.pdb
+savePdb p /home/ly/TAPS/moas-mbp/systems/mbp/structures/mbp_open.pdb
+quit

@@ -1,0 +1,35 @@
+; Same as md_short.mdp but a single temperature group (small vacuum-like peptides in water also work)
+; Use this if the topology has no Non-Protein group (should not happen after solvation).
+integrator               = md
+dt                       = 0.002
+nsteps                   = 50000
+nstlog                   = 500
+nstenergy                = 500
+nstxout-compressed       = 50
+compressed-x-precision   = 1000
+cutoff-scheme            = Verlet
+nstlist                  = 20
+coulombtype              = PME
+rcoulomb                 = 1.0
+vdwtype                  = Cut-off
+rvdw                     = 1.0
+DispCorr                 = EnerPres
+pbc                      = xyz
+tcoupl                   = v-rescale
+tc-grps                  = System
+tau-t                    = 0.1
+ref-t                    = 300
+pcoupl                   = C-rescale
+pcoupltype               = isotropic
+tau-p                    = 5.0
+ref-p                    = 1.0
+compressibility          = 4.5e-5
+constraints              = h-bonds
+constraint-algorithm     = lincs
+gen-vel                  = yes
+gen-temp                 = 300
+gen-seed                 = -1
+continuation             = no
+nstcomm                  = 100
+comm-mode                = Linear
+comm-grps                = System

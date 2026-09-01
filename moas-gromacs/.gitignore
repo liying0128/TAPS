@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+results/**
+!results/.gitkeep
+logs/
+*.xtc
+*.trr
+*.edr
+*.cpt
+*.tpr
+*.gro
+.md_500ns.*

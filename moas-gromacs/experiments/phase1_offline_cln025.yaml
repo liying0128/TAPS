@@ -1,0 +1,47 @@
+# Config-driven experiments. Do not bake operator choice into a single script.
+
+system: cln025_unfolded
+mode: dry_run          # read existing trajectories only; do not launch GROMACS
+total_budget_ns: 82.0
+commit_ps: 40.0
+fold_rmsd_nm: 0.25
+n_replicates: 3
+
+operators:
+  - last
+  - least_counts
+  - random
+  - moas_weighted
+  - moas_pareto
+
+weight_modes:
+  - equal
+  - last_dominant
+  - commitment_dominant
+
+objectives:
+  - novelty
+  - boundary
+  - kinetic
+  - uncertainty
+  - commitment
+  - information_gain
+
+metrics:
+  - coverage
+  - first_hit          # auxiliary only
+  - commit_time
+  - residence
+  - fold_frac
+  - committed_visits
+  - revisits
+  - unique_state_rate
+  - seed_diversity
+
+legacy:
+  campaigns_dir: systems/chignolin_cln025/water_unfolded/adaptive/campaigns
+  analysis_dir: data/legacy/cln025_unfolded
+  candidates: data/candidates/cln_candidates.npz
+
+outputs:
+  results_dir: results/phase1_offline_cln025

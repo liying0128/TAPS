@@ -1,0 +1,3 @@
+# GROMACS runner needs Python >= 3.8 and the standard library only.
+# Analysis / MOAS features (optional until Phase 1 coding starts):
+#   python3 -m pip install numpy scipy pyyaml

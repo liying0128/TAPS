@@ -1,0 +1,7 @@
+# GROMACS runner (run_md.py) needs Python >= 3.8 and the standard library only.
+# Do not pip-install anything just to start the 100/200/500 ns MD jobs.
+#
+# Optional later, for TAPS analysis / the temporal model:
+#   python3 -m pip install numpy scipy torch
+#
+# run_md.py --check will tell you which of these are already installed.

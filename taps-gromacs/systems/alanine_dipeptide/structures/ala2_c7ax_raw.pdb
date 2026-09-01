@@ -1,0 +1,13 @@
+TITLE     ACE-ALA-NME c7ax phi=70.0 psi=-70.0
+ATOM      1  CH3 ACE A   1       0.000   0.000   0.000  1.00  0.00           C
+ATOM      2  C   ACE A   1       1.522   0.000   0.000  1.00  0.00           C
+ATOM      3  O   ACE A   1       2.145   1.062   0.000  1.00  0.00           O
+ATOM      4  N   ALA A   2       2.109  -1.192   0.000  1.00  0.00           N
+ATOM      5  CA  ALA A   2       3.560  -1.332   0.000  1.00  0.00           C
+ATOM      6  C   ALA A   2       4.156  -0.901   1.336  1.00  0.00           C
+ATOM      7  O   ALA A   2       4.642  -1.735   2.100  1.00  0.00           O
+ATOM      8  CB  ALA A   2       4.237  -0.683  -1.209  1.00  0.00           C
+ATOM      9  N   NME A   3       4.112   0.400   1.605  1.00  0.00           N
+ATOM     10  CH3 NME A   3       4.642   0.944   2.839  1.00  0.00           C
+TER
+END
