@@ -13,8 +13,8 @@ CLN025 的七种方法 × 三次重复仍留在 `../moas-gromacs`。AdK n=1 仍�
 | 成功标准 | RMSD&lt;0.25 nm 且停留 ≥ 40 ps | 两角都进入闭态窗口 ≥ 200 ps | **两 CV 都进入闭态窗口且停留 ≥ 200 ps** |
 | 起点 | 展开态 | 开态 apo | **开态 apo（1OMP）** |
 | 初始化 | 10 ns | 20 ns | **20 ns** cMD（四种方法共用） |
-| 短轨迹 | 1 ns × 6 × 12 | 2 ns × 6 × 15 | **2 ns × 6 seeds × 15 轮** |
-| **每条总预算** | 82 ns | 200 ns | **200 ns**（20 + 180） |
+| 短轨迹 | 1 ns × 6 × 12 | 2 ns × 6 × 15 | **2 ns × 6 seeds × 82 轮** |
+| **每条总预算** | 82 ns | 200 ns | **1000 ns（1 μs）**（20 + 980） |
 
 力场仍是 AMBER99SB-ILDN + TIP3P，300 K，0.15 M NaCl。盒子缓冲 1.2 nm，**十二面体**（MBP 比 AdK 大，立方盒子太浪费水）。  
 结构域定义写在 `mbp_cvs.py`：N 叶 1–109 + 264–309，C 叶 114–258 + 316–370。闭态窗口在 `systems/mbp/cv_refs.json`（prepare 后生成）。
@@ -33,7 +33,7 @@ bash scripts/run_em_eq.sh
 # 3) 开态 20 ns 无偏 cMD，作为自适应初始化
 bash scripts/run_cmd_init.sh
 
-# 4) 四种方法各一条 200 ns campaign（seed=0）。再加重复：SEED=1 bash scripts/run_discover.sh
+# 4) 四种方法各一条 1 μs campaign（seed=0；已有 200 ns 会从 history 续跑）。再加重复：SEED=1 bash scripts/run_discover.sh
 bash scripts/run_discover.sh
 ```
 

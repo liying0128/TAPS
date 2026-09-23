@@ -14,8 +14,8 @@ PREFIX="mbp"
 LOG="$ROOT/logs/discover_seed${SEED}.log"
 mkdir -p "$ROOT/logs"
 exec > >(tee -a "$LOG") 2>&1
-echo "[$(date '+%F %T')] MBP discover start  seed=$SEED  methods=random,last,density,moas  budget=200 ns"
+echo "[$(date '+%F %T')] MBP discover start  seed=$SEED  methods=random,last,density,moas  budget=1000 ns"
 python3 stage_mbp_discover.py --gpu --nt "$NT" --seed "$SEED" --tag-prefix "$PREFIX" \
   --methods random last density moas \
-  --init-ns 20 --budget-ns 200 --n-seeds 6 --short-ps 2000 --max-rounds 15
+  --init-ns 20 --budget-ns 1000 --n-seeds 6 --short-ps 2000 --max-rounds 82
 echo "[$(date '+%F %T')] MBP discover exit"

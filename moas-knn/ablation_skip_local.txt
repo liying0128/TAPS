@@ -1,0 +1,4 @@
+# 244 skips these; 55 continues novbnd then only bndtgt.
+# novtgt moves to 244 after local tgt, so the long pole is not 55 doing two full MBP campaigns.
+novbnd
+bndtgt

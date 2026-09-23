@@ -4,12 +4,12 @@
 CVs are N–C domain CA-COM distance (nm) and hinge angle (deg). Success is both
 inside the closed window for ≥ 200 ps (not first-hit).
 
-Requires equilibrated open box and an init cMD (20 ns prefix of a 200 ns campaign):
+Requires equilibrated open box and an init cMD (20 ns prefix of a 1 us campaign):
 
   python3 run_md.py --system mbp_open --length 20 --gpu --nt 16
   python3 stage_mbp_discover.py --check
   python3 stage_mbp_discover.py --gpu --nt 16 --methods random last density moas \
-    --init-ns 20 --budget-ns 200 --n-seeds 6 --short-ps 2000 --max-rounds 15
+    --init-ns 20 --budget-ns 1000 --n-seeds 6 --short-ps 2000 --max-rounds 82
 """
 
 from __future__ import annotations
@@ -40,9 +40,32 @@ from mbp_common import (  # noqa: E402
     run_gmx,
     write_ca_ndx,
 )
+from knn_as import knn_as_scores  # noqa: E402
 
 SHORT_MDP = "md_short_2ns.mdp"
-METHOD_TAGS = {"last": "last", "density": "lc", "random": "random", "moas": "static"}
+METHOD_TAGS = {
+    "last": "last",
+    "density": "lc",
+    "random": "random",
+    "moas": "static",
+    "knn": "knn",
+    "nov": "nov",
+    "bnd": "bnd",
+    "tgt": "tgt",
+    "novbnd": "novbnd",
+    "novtgt": "novtgt",
+    "bndtgt": "bndtgt",
+}
+# Equal percentile mix of novelty / boundary / target. Ablation turns terms off.
+MOAS_OBJECTIVE_WEIGHTS = {
+    "moas": (1.0, 1.0, 1.0),
+    "nov": (1.0, 0.0, 0.0),
+    "bnd": (0.0, 1.0, 0.0),
+    "tgt": (0.0, 0.0, 1.0),
+    "novbnd": (1.0, 1.0, 0.0),
+    "novtgt": (1.0, 0.0, 1.0),
+    "bndtgt": (0.0, 1.0, 1.0),
+}
 OPEN_DIR = ROOT / "systems/mbp/water_open"
 OPEN_GRO = ROOT / "systems/mbp/gmx_common_open/protein.gro"
 PROD_XTC = OPEN_DIR / "runs/md_20ns.xtc"
@@ -144,6 +167,20 @@ def last_frontier_scores(dist_all, theta_all, dist_q, theta_q, nbins: int = 24) 
     lat_rho = lat_rho / (float(lat_rho.max()) + 1e-12)
     on_rim = frontier[iq, jq].astype(np.float64)
     return 1.5 * on_rim + radius * (1.0 - 0.5 * lat_rho)
+
+
+def _moas_mix(inv, last_sc, commit, method: str) -> np.ndarray:
+    wn, wb, wt = MOAS_OBJECTIVE_WEIGHTS[method]
+    parts = []
+    if wn:
+        parts.append(_percentile_rank(inv))
+    if wb:
+        parts.append(_percentile_rank(last_sc))
+    if wt:
+        parts.append(_percentile_rank(commit))
+    if not parts:
+        raise MbpError(f"no MOAS objectives enabled for {method}")
+    return sum(parts) / float(len(parts))
 
 
 def greedy_diverse(dist, theta, score, n_seeds: int, min_sep: float) -> list:
@@ -289,8 +326,14 @@ def select_and_dump(spec, pack, method, n_seeds, min_sep, segments, seed_dir: Pa
         raw = last_sc
     elif method == "random":
         raw = np.random.default_rng(int(rng_seed)).random(len(dist_e))
-    elif method == "moas":
-        raw = (_percentile_rank(inv) + _percentile_rank(last_sc) + _percentile_rank(commit)) / 3.0
+    elif method in MOAS_OBJECTIVE_WEIGHTS:
+        raw = _moas_mix(inv, last_sc, commit, method)
+    elif method == "knn":
+        raw = knn_as_scores(
+            np.column_stack([pool["dist"], pool["theta"]]),
+            np.column_stack([dist_e, theta_e]),
+            rng_seed=int(rng_seed),
+        )
     else:
         raise MbpError(f"unknown method {method}")
     picked = greedy_diverse(dist_e, theta_e, raw, n_seeds, min_sep)
@@ -299,7 +342,7 @@ def select_and_dump(spec, pack, method, n_seeds, min_sep, segments, seed_dir: Pa
     for rank, idx in enumerate(picked):
         seg = segments[int(pack["seg_id"][idx])]
         gro = seed_dir / f"seed_{rank:02d}.gro"
-        dump_frame(Path(seg["tpr"]), Path(seg["xtc"]), float(pack["t_end_ps"][idx]), gro, spec.outdir)
+        gro = dump_frame(Path(seg["tpr"]), Path(seg["xtc"]), float(pack["t_end_ps"][idx]), gro, spec.outdir)
         rec = {
             "rank": rank,
             "window_index": int(idx),
@@ -447,9 +490,14 @@ def run_one_method(args, method: str, tag: str, nt: int, gpu: bool) -> dict:
             records = json.loads(seeds_json.read_text(encoding="utf-8")).get("seeds") or []
             log(f"  reuse {seeds_json.name} ({len(records)} seeds)")
         else:
+            seed_dir = spec.outdir / f"seeds_r{rid:02d}"
+            if seed_dir.exists():
+                alt = spec.outdir / f"seeds_r{rid:02d}_{os.getpid()}"
+                log(f"  {seed_dir.name} already exists; dump to {alt.name}")
+                seed_dir = alt
             records = select_and_dump(
                 spec, pack, method, args.n_seeds, args.min_sep, segments,
-                spec.outdir / f"seeds_r{rid:02d}",
+                seed_dir,
                 rng_seed=int(args.seed) * 10007 + rid,
                 refs=refs,
             )
@@ -478,10 +526,10 @@ def parse_args():
     p.add_argument("--methods", nargs="+", default=["random", "last", "density", "moas"])
     p.add_argument("--tag-prefix", default="mbp")
     p.add_argument("--init-ns", type=float, default=20.0)
-    p.add_argument("--budget-ns", type=float, default=200.0)
+    p.add_argument("--budget-ns", type=float, default=1000.0)
     p.add_argument("--n-seeds", type=int, default=6)
     p.add_argument("--short-ps", type=float, default=2000.0)
-    p.add_argument("--max-rounds", type=int, default=15)
+    p.add_argument("--max-rounds", type=int, default=82)
     p.add_argument("--window-ps", type=float, default=50.0)
     p.add_argument("--horizon-ps", type=float, default=200.0)
     p.add_argument("--stride-ps", type=float, default=10.0)
@@ -496,9 +544,24 @@ def method_tag(prefix: str, method: str, seed: int) -> str:
     return f"{prefix}_{stem}"
 
 
+def _assigned_elsewhere(methods) -> bool:
+    path = ROOT.parent / "moas-knn" / "ablation_skip_local.txt"
+    if not path.is_file():
+        return False
+    skip = {
+        ln.strip()
+        for ln in path.read_text(encoding="utf-8").splitlines()
+        if ln.strip() and not ln.startswith("#")
+    }
+    return bool(methods) and set(methods) <= skip
+
+
 def main() -> int:
     args = parse_args()
     os.environ.setdefault("GMX_MAXBACKUP", "-1")
+    if _assigned_elsewhere(args.methods):
+        log("skip " + ",".join(args.methods) + " (ablation_skip_local.txt; running on another machine)")
+        return 0
     unknown = [m for m in args.methods if m not in METHOD_TAGS]
     if unknown:
         raise MbpError(f"unknown methods {unknown}; allowed: {list(METHOD_TAGS)}")

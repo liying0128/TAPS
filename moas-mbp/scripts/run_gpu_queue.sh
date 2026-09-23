@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GPU queue: EM/eq if needed, 20 ns open init, then Random / LAST / LC / MOAS-static (200 ns each).
+# GPU queue: EM/eq if needed, 20 ns open init, then Random / LAST / LC / MOAS-static (1 us each).
 # Also launched automatically after CLN seed=3 + AdK closed GPU resume
 # (tmux moas:adk-gpu, scripts/run_gpu_chain_after_cln.sh in moas-adk).
 set -euo pipefail

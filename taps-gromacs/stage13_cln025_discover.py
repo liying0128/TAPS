@@ -44,6 +44,7 @@ from taps_common import (  # noqa: E402
     parse_xvg,
     run_gmx,
 )
+from knn_as import knn_as_scores  # noqa: E402
 
 SHORT_MDP = "md_short_1ns.mdp"
 METHOD_TAGS = {
@@ -54,6 +55,7 @@ METHOD_TAGS = {
     "moas": "static",
     "dynamic": "dynamic",
     "pareto": "pareto",
+    "knn": "knn",
 }
 NATIVE_GRO = ROOT / "systems/chignolin_cln025/gmx_common/protein.gro"
 UNF_DIR = ROOT / "systems/chignolin_cln025/water_unfolded"
@@ -457,6 +459,12 @@ def select_and_dump(spec, pack, scores, method, n_seeds, min_nm, segments, seed_
             raw[front] = util[front] + 1.0
         else:
             raw = util
+    elif method in ("knn", "knn-as", "knnas"):
+        raw = knn_as_scores(
+            np.column_stack([pool["rmsd"], pool["rg"]]),
+            np.column_stack([rmsd_e, rg_e]),
+            rng_seed=int(rng_seed),
+        )
     else:
         raw = np.asarray(scores, dtype=np.float64) * inv
     picked = greedy_diverse(rmsd_e, rg_e, raw, n_seeds, min_nm)
@@ -715,7 +723,7 @@ def write_report(args, results: list, cmd: dict, outdir: Path) -> None:
 
 
 def parse_methods(text: str) -> list:
-    allowed = ("taps", "last", "density", "random", "moas", "dynamic", "pareto")
+    allowed = ("taps", "last", "density", "random", "moas", "dynamic", "pareto", "knn")
     out = []
     for raw in text.split(","):
         name = raw.strip().lower()
@@ -727,6 +735,8 @@ def parse_methods(text: str) -> list:
             name = "dynamic"
         if name in ("moas_pareto", "moas-pareto"):
             name = "pareto"
+        if name in ("knn-as", "knnas", "knn_as"):
+            name = "knn"
         if name and name not in allowed:
             raise TapsError(f"unknown method {raw!r}")
         if name and name not in out:

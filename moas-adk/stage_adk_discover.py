@@ -48,9 +48,31 @@ from adk_common import (  # noqa: E402
     run_gmx,
     write_ca_ndx,
 )
+from knn_as import knn_as_scores  # noqa: E402
 
 SHORT_MDP = "md_short_2ns.mdp"
-METHOD_TAGS = {"last": "last", "density": "lc", "random": "random", "moas": "static"}
+METHOD_TAGS = {
+    "last": "last",
+    "density": "lc",
+    "random": "random",
+    "moas": "static",
+    "knn": "knn",
+    "nov": "nov",
+    "bnd": "bnd",
+    "tgt": "tgt",
+    "novbnd": "novbnd",
+    "novtgt": "novtgt",
+    "bndtgt": "bndtgt",
+}
+MOAS_OBJECTIVE_WEIGHTS = {
+    "moas": (1.0, 1.0, 1.0),
+    "nov": (1.0, 0.0, 0.0),
+    "bnd": (0.0, 1.0, 0.0),
+    "tgt": (0.0, 0.0, 1.0),
+    "novbnd": (1.0, 1.0, 0.0),
+    "novtgt": (1.0, 0.0, 1.0),
+    "bndtgt": (0.0, 1.0, 1.0),
+}
 OPEN_DIR = ROOT / "systems/adk/water_open"
 OPEN_GRO = ROOT / "systems/adk/gmx_common_open/protein.gro"
 PROD_XTC = OPEN_DIR / "runs/md_20ns.xtc"
@@ -151,6 +173,20 @@ def last_frontier_scores(lid_all, nmp_all, lid_q, nmp_q, nbins: int = 24) -> np.
     lat_rho = lat_rho / (float(lat_rho.max()) + 1e-12)
     on_rim = frontier[iq, jq].astype(np.float64)
     return 1.5 * on_rim + radius * (1.0 - 0.5 * lat_rho)
+
+
+def _moas_mix(inv, last_sc, commit, method: str) -> np.ndarray:
+    wn, wb, wt = MOAS_OBJECTIVE_WEIGHTS[method]
+    parts = []
+    if wn:
+        parts.append(_percentile_rank(inv))
+    if wb:
+        parts.append(_percentile_rank(last_sc))
+    if wt:
+        parts.append(_percentile_rank(commit))
+    if not parts:
+        raise AdkError(f"no MOAS objectives enabled for {method}")
+    return sum(parts) / float(len(parts))
 
 
 def greedy_diverse(lid, nmp, score, n_seeds: int, min_deg: float) -> list:
@@ -296,8 +332,14 @@ def select_and_dump(spec, pack, method, n_seeds, min_deg, segments, seed_dir: Pa
         raw = last_sc
     elif method == "random":
         raw = np.random.default_rng(int(rng_seed)).random(len(lid_e))
-    elif method == "moas":
-        raw = (_percentile_rank(inv) + _percentile_rank(last_sc) + _percentile_rank(commit)) / 3.0
+    elif method in MOAS_OBJECTIVE_WEIGHTS:
+        raw = _moas_mix(inv, last_sc, commit, method)
+    elif method == "knn":
+        raw = knn_as_scores(
+            np.column_stack([pool["lid"], pool["nmp"]]),
+            np.column_stack([lid_e, nmp_e]),
+            rng_seed=int(rng_seed),
+        )
     else:
         raise AdkError(f"unknown method {method}")
     picked = greedy_diverse(lid_e, nmp_e, raw, n_seeds, min_deg)

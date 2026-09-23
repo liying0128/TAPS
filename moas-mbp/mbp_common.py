@@ -103,13 +103,28 @@ def write_ca_ndx(path: Path, gro: Path) -> list[int]:
     return ids.tolist()
 
 
-def dump_frame(tpr: Path, xtc: Path, t_ps: float, dest: Path, cwd: Path) -> None:
+def dump_frame(tpr: Path, xtc: Path, t_ps: float, dest: Path, cwd: Path) -> Path:
+    """Write one frame to gro. Never truncate/unlink an existing dest (a wedged
+    inode from a killed trjconv can block the whole GPU queue in D-state)."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     gmx = find_gmx()
+    tmp = dest.with_name(f".{dest.stem}.{os.getpid()}.tmp.gro")
     run_gmx(
-        [gmx, "trjconv", "-s", str(tpr), "-f", str(xtc), "-dump", f"{t_ps:.3f}", "-o", str(dest)],
+        [gmx, "trjconv", "-s", str(tpr), "-f", str(xtc), "-dump", f"{t_ps:.3f}", "-o", str(tmp)],
         cwd=cwd,
         stdin_text="System\n",
     )
-    if not dest.exists() or dest.stat().st_size == 0:
-        raise MbpError(f"trjconv did not write {dest}")
+    if not tmp.exists() or tmp.stat().st_size == 0:
+        raise MbpError(f"trjconv did not write {tmp}")
+    final = dest
+    try:
+        exists = dest.exists()
+    except OSError:
+        exists = True
+    if exists:
+        final = dest.with_name(f"{dest.stem}.{os.getpid()}.gro")
+        log(f"dump_frame: skip existing {dest.name}; write {final.name}")
+    os.replace(tmp, final)
+    if not final.exists() or final.stat().st_size == 0:
+        raise MbpError(f"trjconv did not write {final}")
+    return final
