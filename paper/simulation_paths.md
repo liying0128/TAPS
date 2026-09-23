@@ -203,7 +203,7 @@ rsync -av lan55:TAPS/moas-adk/analysis/adk_open/campaigns/<tag>/history.json \
 | `paper/tables/n3_metrics.csv` | n = 3 hit / commit / occupancy |
 | `paper/tables/ablation_metrics.csv` | 消融 |
 | `paper/tables/results_summary.md` | 中位数摘要 |
-| `paper/figures/fig1_workflow.{png,pdf}` … `fig7_explore_vs_target.{png,pdf}` | 主文图 |
+| `paper/figures/fig1_workflow.{png,pdf}` … `fig8_explore_vs_target.{png,pdf}` | 主文图（含 Fig. 3 Kaplan–Meier） |
 | `paper/MOAS_manuscript_draft.docx` | 主文 |
 | `paper/MOAS_supporting_information.docx` | SI |
 

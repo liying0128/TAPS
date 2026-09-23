@@ -1,0 +1,59 @@
+{
+  "CLN025": {
+    "start": "unfolded",
+    "target_reference": "native 5AWL / 2RVD chain A",
+    "cvs": ["Cα-RMSD to native (nm)", "Rg (nm)"],
+    "window_W": "rmsd < 0.25 nm",
+    "fold_rmsd_nm": 0.25,
+    "commit_ps": 40.0,
+    "commit_definition": "contiguous sojourn duration t_end - t_start + dt >= tau (main-text CLN025)",
+    "init_unbiased_ns": 10,
+    "short_md_ns": 1,
+    "n_seeds": 6,
+    "diversity_delta": "1.0 in CV units (nm)",
+    "nbins": 24,
+    "budget_ns": 82.154,
+    "production_loop": "taps-gromacs/stage13_cln025_discover.py"
+  },
+  "AdK": {
+    "start": "open apo (4AKE-like)",
+    "target_reference": "closed 1AKE",
+    "cvs": ["LID–CORE angle (deg)", "NMP–CORE angle (deg)"],
+    "cv_groups": {
+      "LID": {"vertex": [115, 125], "arm1": [179, 185], "arm2": [125, 153]},
+      "NMP": {"vertex": [115, 125], "arm1": [90, 100], "arm2": [35, 55]}
+    },
+    "window_W": "LID < 114.40080018753265 deg AND NMP > 41.84875573061706 deg",
+    "refs_file": "adk_angle_refs.json",
+    "commit_ps": 200.0,
+    "commit_definition": "round(tau / dt) consecutive True frames, dt = 2 ps",
+    "init_unbiased_ns": 20,
+    "short_md_ns": 2,
+    "n_seeds": 6,
+    "diversity_delta_deg": 1.0,
+    "nbins": 24,
+    "budget_ns": 200.19,
+    "production_loop": "moas-adk/stage_adk_discover.py"
+  },
+  "MBP": {
+    "start": "open apo (1OMP)",
+    "target_reference": "closed 1ANF, ligand removed",
+    "cvs": ["N–C domain CA-COM distance (nm)", "hinge angle (deg)"],
+    "cv_groups": {
+      "N_domain": [[1, 109], [264, 309]],
+      "C_domain": [[114, 258], [316, 370]],
+      "hinge": [[109, 114], [258, 264], [309, 316]]
+    },
+    "window_W": "dist < 2.884710066499646 nm AND theta < 115.8800434202613 deg",
+    "refs_file": "mbp_cv_refs.json",
+    "commit_ps": 200.0,
+    "commit_definition": "round(tau / dt) consecutive True frames, dt = 2 ps",
+    "init_unbiased_ns": 20,
+    "short_md_ns": 2,
+    "n_seeds": 6,
+    "diversity_delta": "1.0 in mixed (nm, deg) Euclidean after greedy check",
+    "nbins": 24,
+    "budget_ns": 1004.99,
+    "production_loop": "moas-mbp/stage_mbp_discover.py"
+  }
+}

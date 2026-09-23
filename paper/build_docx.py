@@ -3,6 +3,10 @@
 
 from __future__ import annotations
 
+import csv
+import os
+import tempfile
+import time
 from pathlib import Path
 
 from docx import Document
@@ -16,6 +20,23 @@ ROOT = Path(__file__).resolve().parent
 FIG = ROOT / "figures"
 OUT_MS = ROOT / "MOAS_manuscript_draft.docx"
 OUT_SI = ROOT / "MOAS_supporting_information.docx"
+
+
+def save_watched(doc, path: Path) -> None:
+    """Atomic save so Cursor's Office Viewer file watcher reloads the open tab."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(suffix=".docx", dir=path.parent)
+    os.close(fd)
+    tmp_path = Path(tmp)
+    try:
+        doc.save(str(tmp_path))
+        os.replace(tmp_path, path)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    time.sleep(0.25)
+    os.utime(path, None)
 
 
 def set_run_font(run, name="Times New Roman", size=11, bold=False, italic=False, color=None):
@@ -46,6 +67,28 @@ def add_p(doc, text, *, size=11, bold=False, italic=False, space_after=8, first_
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     run = p.add_run(text)
     set_run_font(run, size=size, bold=bold, italic=italic, color=color)
+    return p
+
+
+def add_p_markup(doc, text, *, size=11, space_after=8, first_line=True, align="left"):
+    """Justified body paragraph; **...** becomes bold."""
+    p = doc.add_paragraph()
+    pf = p.paragraph_format
+    pf.space_after = Pt(space_after)
+    pf.space_before = Pt(0)
+    pf.line_spacing_rule = WD_LINE_SPACING.ONE_POINT_FIVE
+    if first_line:
+        pf.first_line_indent = Cm(0.74)
+    if align == "justify":
+        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    elif align == "center":
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        pf.first_line_indent = Cm(0)
+    for i, part in enumerate(text.split("**")):
+        if not part:
+            continue
+        run = p.add_run(part)
+        set_run_font(run, size=size, bold=(i % 2 == 1))
     return p
 
 
@@ -376,109 +419,115 @@ def build_manuscript():
     add_authors(doc)
 
     add_h(doc, "Abstract", 1)
-    add_p(
-        doc,
-        "Adaptive sampling is widely used to accelerate molecular dynamics of rare protein "
-        "conformational changes. Success is still often scored by the first time a trajectory "
-        "enters a predefined target window. That criterion is not sufficient: a simulation can "
-        "graze the target, leave immediately, and never establish persistent sampling of the "
-        "basin. We introduce MOAS, a multi-objective adaptive sampling strategy that ranks "
-        "candidate seeds by novelty, boundary exploration, and target proximity, mixed by equal "
-        "percentile ranks under a diversity constraint. The primary endpoints are a committed "
-        "visit of the target window and the occupancy of that basin over the full simulation "
-        "budget. We apply the method to chignolin folding, the open-to-closed transition of "
-        "adenylate kinase, and domain closure of apo maltose-binding protein. MOAS established "
-        "committed sampling in every replicate on every system, whereas random selection almost "
-        "never committed and exploration-oriented methods often hit the window without remaining "
-        "there. Occupancy of the target basin was substantially higher for MOAS than for the "
-        "matched baselines. Ablation indicates that exploration and target-directed terms are "
-        "complementary, and that no reduced mix reproduced the residence of the full method. "
-        "The results support scoring adaptive sampling of target states by committed, persistent "
-        "sampling rather than by first encounter alone.",
-        first_line=True,
-        align="justify",
-    )
+    p = doc.add_paragraph()
+    pf = p.paragraph_format
+    pf.space_after = Pt(8)
+    pf.space_before = Pt(0)
+    pf.line_spacing_rule = WD_LINE_SPACING.ONE_POINT_FIVE
+    pf.first_line_indent = Cm(0.74)
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    chunks = [
+        (
+            "Adaptive sampling is widely used to accelerate molecular dynamics simulations of "
+            "rare protein conformational changes, yet its success is often evaluated by the first "
+            "time a trajectory enters a predefined target window. A first encounter, however, "
+            "does not establish that the target state has been sampled: a trajectory may briefly "
+            "enter the target region and rapidly leave it. We therefore distinguish ",
+            False,
+        ),
+        ("first hit", True),
+        (", ", False),
+        ("committed visit", True),
+        (", and ", False),
+        ("target-basin occupancy", True),
+        (
+            " as measures of encounter, stabilization, and persistent sampling, respectively. "
+            "We introduce ",
+            False,
+        ),
+        ("multi-objective adaptive sampling (MOAS)", True),
+        (
+            ", which ranks candidate seeds according to novelty, boundary exploration, and "
+            "target proximity using equal percentile ranks with a diversity constraint. MOAS was "
+            "evaluated against matched Random, LAST, least-counts, and kNN-AS campaigns on "
+            "chignolin folding, adenylate kinase open-to-closed transition, and apo "
+            "maltose-binding protein domain closure. Across these systems, evaluating campaigns "
+            "by committed visits and target-basin occupancy revealed differences that were not "
+            "captured by first-hit times alone. MOAS achieved committed sampling in all three "
+            "independent replicates for each benchmark system and generally produced sustained "
+            "target-basin occupancy, while exploration-oriented methods could achieve early "
+            "target encounters without establishing persistent sampling. Importantly, LAST also "
+            "performed well on specific systems, including complete commitment across the "
+            "chignolin replicates and high occupancy in one MBP campaign. These results support "
+            "a broader evaluation framework in which adaptive sampling of target states is "
+            "assessed by committed and persistent sampling rather than first encounter alone.",
+            False,
+        ),
+    ]
+    for text, bold in chunks:
+        run = p.add_run(text)
+        set_run_font(run, size=11, bold=bold)
 
     add_h(doc, "1. Introduction", 1)
-    add_p(
+    add_p_markup(
         doc,
-        "Molecular dynamics (MD) can, in a single trajectory, supply the structural, "
-        "thermodynamic, and kinetic information that a crystal structure does not: which basins "
-        "are populated, how they interconvert, and along which coordinates. That combination is "
-        "why MD is used for folding, domain motion, and ligand-linked conformational change. The "
-        "limitation is timescale. Unbiased integration advances on a femtosecond step, whereas "
-        "the protein transitions of interest often lie on microsecond-to-millisecond or longer "
-        "scales, so extending one long trajectory is an inefficient way to spend a finite budget "
-        "on a rare event. Adaptive sampling spends the same budget more productively: "
-        "configurations are harvested from the visited ensemble, ranked, used as starting points "
-        "(seeds) for short trajectories, and pooled, and the cycle repeats. The usual design "
-        "question is where to sample next—which regions of collective-variable (CV) space are "
-        "still empty, under-counted, or on the frontier of the cloud. That question is necessary, "
-        "but it is not sufficient. The central question is not only where to sample next, but "
-        "also how to define a successful sampling event.",
+        "Molecular dynamics (MD) simulations provide structural, thermodynamic, and kinetic "
+        "information that is difficult to obtain from static structures, but biologically "
+        "relevant conformational transitions often occur on timescales far beyond those "
+        "accessible to a single unbiased trajectory. Adaptive sampling addresses this limitation "
+        "by repeatedly harvesting configurations from previously visited trajectories, ranking "
+        "candidate configurations, and launching short simulations from selected seeds. Most "
+        "adaptive strategies therefore focus on **where to sample next**—for example, poorly "
+        "explored, low-density, or frontier regions of conformational space. However, for "
+        "target-state sampling, where a simulation campaign aims to establish a particular "
+        "conformational state rather than merely discover new regions, the definition of a "
+        "successful sampling event is equally important.",
         align="justify",
     )
-    add_p(
+    add_p_markup(
         doc,
-        "How that event is defined depends on what a method is built to favor. Existing adaptive "
-        "schemes are coherent once those aims are stated; they are not interchangeable, and they "
-        "are not failures of one another’s objectives. Random selection provides unbiased, diverse "
-        "restarts from the current pool. Least-counts directs seeds into under-sampled histogram "
-        "bins. LAST drives the ensemble toward the frontier of the visited cloud. kNN-AS, a "
-        "machine-learning frontier score, similarly emphasizes low-density or otherwise "
-        "under-explored regions of CV space. By construction, all of these strategies tend to "
-        "explore where the trajectory has not been. That is a well-posed objective for covering "
-        "conformational space. It is not equivalent to remaining where the target state is. When "
-        "success is recorded as first hit—the first time any frame enters a predefined target "
-        "window—the two aims are quietly substituted for one another. A method can be excellent "
-        "at pushing the cloud outward, record an early hit, and still never establish the target "
-        "as a sampled basin. The gap this paper addresses is therefore not that exploration "
-        "methods explore, but that first hit is not a committed visit.",
+        "A first encounter with a target region does not necessarily indicate that the target "
+        "state has been sampled. We distinguish three progressively stronger outcomes: "
+        "**first hit**, the first entry into a predefined target window; **committed visit**, "
+        "continuous residence within that window for a specified minimum duration; and "
+        "**target-basin occupancy**, the fraction of the total simulation budget spent in the "
+        "target region. First hit measures discovery, whereas commitment and occupancy measure "
+        "stabilization and sustained sampling. An exploration-oriented strategy can therefore "
+        "achieve an early first hit or high conformational coverage while contributing little "
+        "persistent sampling of the target state. We argue that these quantities should be "
+        "treated as complementary campaign outcomes rather than collapsed into a single measure "
+        "of adaptive-sampling efficiency.",
         align="justify",
     )
-    add_p(
+    add_p_markup(
         doc,
-        "The substitution is easier to see if campaign outcomes are ranked rather than collapsed "
-        "into a single time. A run may never enter the target window; it may enter once (a first "
-        "hit); it may remain inside the predefined target region continuously for a specified "
-        "minimum duration (a committed visit); or it may spend a substantial fraction of the "
-        "budget there (sustained target-basin occupancy). These are not interchangeable. First "
-        "hit is a passage event, committed visit is a sojourn, and occupancy is a time-averaged "
-        "residence, so a campaign can stop after a brief encounter. A trajectory can therefore "
-        "have a short first-hit time but essentially zero useful target-state sampling—the "
-        "premise of Figure 2, and the reason committed visit, not first hit, is the primary "
-        "endpoint below.",
+        "This distinction also defines the scope of the present benchmark. We compare methods "
+        "that share the same seed-selection framework—an initial unbiased ensemble, short "
+        "trajectories, pooling of visited configurations, and ranking of candidate "
+        "seeds—including Random, least-counts, LAST, and kNN-AS. These methods emphasize "
+        "unbiased restarting, under-sampled regions, frontier exploration, or low-density "
+        "exploration, respectively. Other rare-event approaches, including weighted-ensemble "
+        "methods, adaptive Markov-state-model schemes, reinforcement-learning approaches, and "
+        "enhanced-sampling or path-based methods, address related rare-event problems but alter "
+        "the sampling architecture or introduce additional statistical or biasing machinery; "
+        "they are therefore not treated as matched seed-selection baselines here.",
         align="justify",
     )
-    add_p(
+    add_p_markup(
         doc,
-        "In this work we introduce MOAS, a multi-objective adaptive sampling strategy that ranks "
-        "candidate seeds by novelty (inverse local density), boundary exploration (LAST-style "
-        "frontier), and target proximity, mixed by equal percentile ranks and subject to a "
-        "diversity constraint. Campaigns are scored by committed visit and by occupancy, and "
-        "MOAS is compared with Random, LAST, least-counts, and kNN-AS under matched initialization, "
-        "short-MD length, and aggregate time on CLN025 folding, the adenylate kinase open-to-closed "
-        "transition, and apo maltose-binding protein domain closure (n = 3). The sampling objective "
-        "of each baseline is summarized in Table 1. The working hypothesis "
-        "is that balancing exploration of poorly sampled regions with target-directed exploitation "
-        "converts transient encounters into committed and persistent target-state sampling.",
+        "Here we introduce **multi-objective adaptive sampling (MOAS)**, which combines novelty, "
+        "LAST-style boundary exploration, and target proximity through equal percentile ranks "
+        "with a diversity constraint. Rather than optimizing first-hit time alone, we evaluate "
+        "adaptive campaigns using committed visits and target-basin occupancy as the primary "
+        "endpoints, with first hit and conformational coverage retained as discovery diagnostics. "
+        "MOAS is benchmarked against Random, LAST, least-counts, and kNN-AS under matched "
+        "simulation budgets on CLN025 folding, adenylate kinase open-to-closed transition, and "
+        "apo maltose-binding protein domain closure (n = 3). Our working hypothesis is that "
+        "combining continued exploration with explicit target proximity can convert transient "
+        "target encounters into committed and persistent target-state sampling, without assuming "
+        "that any single adaptive strategy is universally optimal across different sampling "
+        "objectives.",
         align="justify",
-    )
-    add_table(
-        doc,
-        ["Method", "Sampling objective"],
-        [
-            ["Random", "Unbiased restart from the current pool"],
-            ["Least-counts", "Under-sampled regions of a CV histogram"],
-            ["LAST", "Frontier of the visited ensemble"],
-            ["kNN-AS", "Low-density regions of CV space"],
-        ],
-    )
-    add_caption(
-        doc,
-        "Table 1. Optimization target of each exploration-oriented baseline. These methods "
-        "are compared with MOAS under a matched budget in Results; they are not scored against "
-        "aims they were not designed to serve.",
     )
 
     add_h(doc, "2. Materials and Methods", 1)
@@ -752,7 +801,7 @@ def build_manuscript():
         "309–316. The closed window is distance < 2.885 nm and hinge < 115.9°. Commitment "
         "requires both CVs in that window for at least 200 ps. Each campaign uses a 20 ns open "
         "initialization, then 82 rounds of 6 × 2 ns short trajectories (aggregate budget 1 μs). "
-        "The protocol is summarized with CLN025 and AdK in Table 2.",
+        "The protocol is summarized with CLN025 and AdK in Table 1.",
         align="justify",
     )
     add_table(
@@ -766,7 +815,7 @@ def build_manuscript():
     )
     add_caption(
         doc,
-        "Table 2. Simulation protocol. Closed windows for AdK and MBP are side-aware cuts "
+        "Table 1. Simulation protocol. Closed windows for AdK and MBP are side-aware cuts "
         "between the open and closed reference structures. CLN025 starts unfolded; AdK and MBP "
         "start from the open apo crystal conformation.",
     )
@@ -775,7 +824,10 @@ def build_manuscript():
     add_p(
         doc,
         "Every system was run with five methods under identical initialization, short-MD length, "
-        "seed count, diversity rule, and budget. Random assigns uniform scores to eligible "
+        "seed count, diversity rule, and budget. The inclusion criterion is that a method can "
+        "replace only the ranking function inside the protocol of Sections 2.2–2.9; weighted "
+        "ensemble, adaptive MSM, and reinforcement-learning samplers change the engine and are "
+        "not used as matched controls. Random assigns uniform scores to eligible "
         "windows. LAST uses only the boundary score of Section 2.4. Least-counts uses only the "
         "inverse-density novelty score of Section 2.3. kNN-AS follows Rovers et al. (J. Chem. "
         "Theory Comput. 2025): the visited CV cloud is subsampled with probability P = 0.5 and "
@@ -834,7 +886,8 @@ def build_manuscript():
     add_p(
         doc,
         "It is reported for completeness. It is not the primary success criterion: a campaign "
-        "may hit and still fail to remain in the basin.",
+        "may hit and still fail to remain in the basin. First hit answers whether the window was "
+        "encountered. It does not answer whether the target state was sampled.",
         align="justify",
     )
 
@@ -843,7 +896,8 @@ def build_manuscript():
         doc,
         "A committed visit is the primary endpoint. With frame spacing Δt, it is the first time "
         "a contiguous sojourn inside W reaches duration τ (τ = 40 ps on CLN025; 200 ps on AdK "
-        "and MBP):",
+        "and MBP). Equivalently, a committed visit occurs when the longest contiguous sojourn "
+        "in W is at least τ:",
         align="justify",
     )
     add_eq(
@@ -867,7 +921,13 @@ def build_manuscript():
     add_p(
         doc,
         "The clock is accumulated campaign time, not wall-clock time. A campaign that records a "
-        "first hit but never meets this sojourn is classified as transient-only.",
+        "first hit but never meets this sojourn is classified as transient-only. The production "
+        "values of τ are system-specific and are not treated as universal constants. To test "
+        "whether ranking by committed sampling depends on that choice, the same pooled "
+        "trajectories were re-scored at neighboring thresholds without additional MD (CLN025: "
+        "20, 40, 60, and 80 ps; AdK and MBP: 100, 200, 300, and 500 ps). Committed fraction, "
+        "time-to-commit, and occupancy at each τ are reported in Supporting Information "
+        "Figure S1 and Table S6. Occupancy is independent of τ by construction.",
         align="justify",
     )
 
@@ -890,8 +950,20 @@ def build_manuscript():
         doc,
         "It measures persistent sampling after—or in the absence of—commitment, and is the "
         "quantity that distinguishes a brief encounter from continued exploration of the target "
-        "state. Coverage of the 24 × 24 CV histogram is stored as an exploration diagnostic and "
-        "is not used as a success criterion.",
+        "state. Occupancy is a time average of 1_W and therefore depends on both how often a "
+        "trajectory enters W and how long it remains. To examine the same trajectories without "
+        "choosing τ, each contiguous sojourn inside W is retained as a residence time T, using "
+        "the production duration definition of Section 2.12. The empirical survival P(T ≥ t) is "
+        "averaged over the n = 3 campaigns (a campaign with no visit contributes 0), and the "
+        "longest sojourn of each campaign is reported (Supporting Information Figure S2A–F and "
+        "Table S7). A committed visit is the event that the longest sojourn is at least τ, so "
+        "commitment is one slice of the residence-time distribution rather than a separate "
+        "success definition. Separately, occupancy is recomputed under neighboring definitions "
+        "of W—CLN025 RMSD cutoffs 0.15–0.40 nm, AdK LID/NMP margins of ±4° and ±8° about the "
+        "production rectangle, and MBP tighter and looser domain-distance / hinge-angle "
+        "windows—to test whether the occupancy ranking is an artifact of the production window "
+        "(Figure S2G–I and Table S8). Coverage of the 24 × 24 CV histogram is stored as an "
+        "exploration diagnostic and is not used as a success criterion.",
         align="justify",
     )
 
@@ -900,10 +972,16 @@ def build_manuscript():
         doc,
         "Main comparisons use n = 3 independent adaptive campaigns per method and system. We "
         "report replicate counts (for example 3/3 committed), per-replicate hit and commit times, "
-        "and median occupancy with the interquartile range. Ablation of objective combinations "
-        "is n = 1 on AdK and MBP. "
-        "Kaplan–Meier curves and bootstrap confidence intervals on time-to-commit can be computed "
-        "from the replicate table in the Supporting Information without additional MD.",
+        "and median occupancy with the interquartile range. Time to committed visit is summarized "
+        "with Kaplan–Meier estimators of the probability of not yet committing; campaigns that "
+        "never committed are right-censored at the campaign budget. Uncertainty on the Kaplan–Meier "
+        "median time-to-commit, the commitment probability, and the median occupancy is reported "
+        "as 95% percentile bootstrap intervals from 10,000 resamples of the n = 3 campaigns. "
+        "When fewer than half of the campaigns in a sample committed, the Kaplan–Meier median is "
+        "not reached. With n = 3 the bootstrap interval for a 0/3 or 3/3 proportion is degenerate "
+        "at 0 or 1, and the interval for a 1/3 or 2/3 proportion spans [0, 1]; occupancy and "
+        "Kaplan–Meier medians remain informative. Ablation of objective combinations is n = 1 "
+        "on AdK and MBP.",
         align="justify",
     )
 
@@ -950,11 +1028,13 @@ def build_manuscript():
         "hit. MOAS on the same initialization established repeated closed-basin residence after "
         "commitment (Figure 2B). Across systems, an early first hit did not predict high occupancy: "
         "several LAST, least-counts, and kNN-AS campaigns hit and still finished below 1% occupancy "
-        "(Figure 2C). Conversion of a hit into a committed visit was incomplete for those "
-        "exploration-oriented runs and complete for MOAS among campaigns that hit (Figure 2D). "
+        "(Figure 2C). Conversion of a hit into a committed visit was complete for LAST and "
+        "least-counts on CLN025, and for MOAS on every system; it was incomplete for several "
+        "LAST, least-counts, and kNN-AS campaigns on AdK and MBP (Figure 2D). "
         "A trajectory can therefore have a short first-hit time and essentially no useful "
-        "target-state sampling. Subsequent sections score campaigns by committed visit and by "
-        "target-basin occupancy, not by first hit alone.",
+        "target-state sampling. Subsequent sections do not ask which method is fastest. They "
+        "ask how campaigns read once success is defined as a committed visit and as "
+        "target-basin occupancy, not as first hit alone.",
         align="justify",
     )
     add_fig(
@@ -962,13 +1042,14 @@ def build_manuscript():
         "fig2_hit_vs_commit.png",
         "Figure 2. First-hit detection does not establish successful target-state sampling. "
         "(A) CLN025 rolling occupancy of the folded window (2 ns kernel) for TAPS, LAST, and "
-        "MOAS (seed 0). (B) AdK rolling closed occupancy: Random hits at 83 ns and escapes; "
-        "MOAS remains in the basin. (C) First-hit time versus occupancy for all n = 3 campaigns; "
-        "open symbols did not hit. (D) Fraction of hits that later committed. TAPS is shown "
-        "only for CLN025.",
+        "MOAS (seed 0); filled area is the same trace, diamonds mark committed visits. "
+        "(B) AdK rolling closed occupancy: Random hits at 83 ns and escapes; MOAS remains in "
+        "the basin. (C) First-hit time versus occupancy on each protein; open symbols did not "
+        "hit (plotted at the budget). (D) Fraction of hits that later committed; × marks "
+        "method–protein pairs with no first hit. TAPS is shown only for CLN025.",
     )
 
-    add_h(doc, "3.2 MOAS enables committed sampling across distinct protein conformational transitions", 2)
+    add_h(doc, "3.2 Committed sampling across three conformational transitions", 2)
     add_p(
         doc,
         "The evaluation criteria of Section 3.1 were applied to three conformational transitions "
@@ -976,38 +1057,124 @@ def build_manuscript():
         "in RMSD < 0.25 nm), apo AdK open-to-closed (200 ns; both LID/NMP angles in the closed "
         "window ≥ 200 ps), and apo MBP domain closure (1 μs; domain distance and hinge angle in "
         "the closed window ≥ 200 ps). Each method used the same initialization, short-MD length, "
-        "six seeds per round, and n = 3 independent campaigns (Table 2).",
+        "six seeds per round, and n = 3 independent campaigns (Table 1).",
         align="justify",
     )
     add_p(
         doc,
-        "Committed-replicate counts are summarized in Figure 3A–C. MOAS committed in 3/3 "
+        "Committed-replicate counts are summarized in Figure 4A–C. MOAS committed in 3/3 "
         "campaigns on every protein. Random committed in 0/9 campaigns. LAST committed in 3/3 "
         "CLN025 runs, 0/3 AdK runs, and 1/3 MBP runs. Least-counts committed in 3/3, 2/3, and "
-        "1/3. kNN-AS committed in 1/3, 1/3, and 2/3. Per-replicate outcomes (committed, hit-only, "
-        "or no hit) are shown in Figure 3F. The pattern is not that MOAS is always the first to "
-        "hit, but that it is the only method that recorded a committed visit on every replicate "
-        "of every transition.",
+        "1/3. kNN-AS committed in 1/3, 1/3, and 2/3. Per-replicate outcomes are classified in "
+        "Figure 4F as no hit, hit only, or committed: the three levels of the evaluation "
+        "framework (no encounter, encounter without stabilization, and committed sampling). "
+        "The pattern is not that MOAS is always the first to hit, and it is not that LAST failed. "
+        "LAST and least-counts also committed in 3/3 CLN025 campaigns. What differs across "
+        "proteins is whether a frontier or least-counts objective, built for discovery, also "
+        "yields a committed visit. MOAS, which mixes those exploration ranks with target "
+        "proximity, recorded a committed visit on every replicate of every transition. That is "
+        "a statement about the sampling objective, not a ranking of methods by speed.",
         align="justify",
     )
     add_p(
         doc,
-        "Among campaigns that committed, median times to commitment were 36.1 ns for MOAS on "
-        "CLN025 (LAST 46.4 ns; least-counts 68.6 ns), 105.7 ns on AdK, and 442.8 ns on MBP "
-        "(Figure 3D). On MBP, kNN-AS committed later (median 705 ns) and LAST’s single success "
-        "was at 320 ns. Target-basin occupancy for all replicates is shown in Figure 3E and is "
-        "examined in Section 3.3; it is included here so that commitment and residence can be "
-        "read on the same campaign set.",
+        "Time-to-commit is shown as Kaplan–Meier curves of the probability of not yet committing "
+        "(Figure 3). Crosses mark campaigns that reached the budget without a committed visit "
+        "and are right-censored there. On CLN025, both LAST and MOAS fall to zero: all three "
+        "replicates of each method committed. Random remains at one on every protein. LAST stays "
+        "high on AdK and MBP, where it did not reach three commits. Least-counts and kNN-AS "
+        "occupy intermediate paths that depend on the system. Table 2 reports the Kaplan–Meier "
+        "median time-to-commit, the commitment probability, and the median occupancy, each with "
+        "a 95% bootstrap interval. MOAS medians are 36.1 ns on CLN025 [34.1, 40.1], 105.7 ns on "
+        "AdK [103.4, 192.3], and 442.8 ns on MBP [216.8, 503.5]. Occupancy intervals for MOAS do "
+        "not overlap those of Random on any system. Those intervals are not a claim that MOAS "
+        "is uniformly faster than LAST. Where fewer than two of three campaigns committed, the "
+        "Kaplan–Meier median is not reached.",
         align="justify",
     )
     add_fig(
         doc,
-        "fig3_benchmark.png",
-        "Figure 3. MOAS enables committed sampling across distinct protein conformational "
-        "transitions (n = 3). (A–C) Number of committed replicates on CLN025, AdK, and MBP. "
+        "fig3_km.png",
+        "Figure 3. Kaplan–Meier estimates of the probability of not yet committing (n = 3). "
+        "(A) CLN025, (B) AdK, (C) MBP. Crosses are campaigns that never committed, censored at "
+        "the budget. The dotted line is S(t) = 0.5.",
+    )
+    boot_rows = []
+    with (ROOT / "tables" / "bootstrap_metrics.csv").open(encoding="utf-8") as fh:
+        for rec in csv.DictReader(fh):
+            med = rec["median_ttc"]
+            if med in ("", None):
+                med_s = "n.r."
+            else:
+                med_s = f"{float(med):.1f} [{float(rec['median_lo']):.1f}, {float(rec['median_hi']):.1f}]"
+            boot_rows.append(
+                [
+                    rec["system"],
+                    rec["method"],
+                    med_s,
+                    f"{float(rec['p_commit']):.2f} [{float(rec['p_lo']):.2f}, {float(rec['p_hi']):.2f}]",
+                    f"{float(rec['occupancy']):.2f} [{float(rec['occ_lo']):.2f}, {float(rec['occ_hi']):.2f}]",
+                ]
+            )
+    add_table(
+        doc,
+        [
+            "System",
+            "Method",
+            "KM median ttc (ns)",
+            "P(commit)",
+            "Occupancy (%)",
+        ],
+        boot_rows,
+    )
+    add_caption(
+        doc,
+        "Table 2. Bootstrap 95% percentile intervals (10,000 resamples of n = 3). "
+        "KM median ttc is the Kaplan–Meier median time-to-commit; n.r., not reached "
+        "(S(t) never falls to 0.5). Occupancy is the median across replicates. With n = 3, "
+        "bootstrap intervals for a 0/3 or 3/3 proportion are degenerate.",
+    )
+    add_p(
+        doc,
+        "Among campaigns that committed, the corresponding point estimates match Figure 4D. On "
+        "CLN025 the three methods that committed in 3/3 did so at 36.1 ns (MOAS), 46.4 ns (LAST), "
+        "and 68.6 ns (least-counts). Those times are not ranked: MOAS is not claimed to be faster "
+        "than LAST. On MBP, LAST’s single success was at 320 ns, earlier than the MOAS median of "
+        "442.8 ns, so LAST’s Kaplan–Meier median is not reached. kNN-AS on MBP committed later "
+        "(Kaplan–Meier median 837 ns). Target-basin occupancy for all replicates is shown in "
+        "Figure 4E and is examined in Section 3.3.",
+        align="justify",
+    )
+    add_fig(
+        doc,
+        "fig4_benchmark.png",
+        "Figure 4. Committed sampling across three conformational transitions (n = 3). "
+        "(A–C) Committed replicates out of three on CLN025, AdK, and MBP. The filled marker is "
+        "the observed count; the open marker is complete success (3/3), so the gap is campaigns "
+        "that did not commit. "
         "(D) Time to committed visit (log scale); × marks campaigns that never committed "
-        "(plotted at the budget). (E) Target-basin occupancy. (F) Per-replicate outcome: "
-        "C, committed; H, hit only; —, no hit.",
+        "(plotted at the budget). (E) Target-basin occupancy. (F) Per-replicate classification: "
+        "no hit, hit only, or committed (no encounter, encounter, and stabilization).",
+    )
+    add_p(
+        doc,
+        "Because τ is a protocol choice, the same trajectories were re-scored at neighboring "
+        "sojourn thresholds (Supporting Information Figure S1 and Table S6). No additional MD "
+        "was run. On CLN025, MOAS remained 3/3 committed from 20 to 80 ps. LAST and least-counts "
+        "were 3/3 at 20–40 ps and dropped to 2/3 and 1/3 at 60–80 ps; kNN-AS fell from 2/3 at "
+        "20 ps to 1/3 at the production 40 ps and 0/3 at 60–80 ps; TAPS was 3/3 only at 20 ps "
+        "(1/3 thereafter); Random never committed. On AdK, MOAS was 3/3 at 100–300 ps and 2/3 "
+        "at 500 ps; LAST was 0/3 at every τ; least-counts was 2/3 until 300 ps and 1/3 at 500 ps; "
+        "kNN-AS was 1/3 throughout; Random committed in 1/3 only at 100 ps. On MBP, MOAS was 3/3 "
+        "from 100 to 500 ps; LAST was 2/3 at 100 ps and 1/3 thereafter; least-counts 1/3; kNN-AS "
+        "2/3 until 300 ps and 1/3 at 500 ps; Random 1/3 only at 100 ps. Median time-to-commit for "
+        "MOAS moved little except a modest delay on CLN025 at 60–80 ps (36.1 to 40.1 ns) and on "
+        "AdK at 500 ps (105.7 to 121.8 ns among the two remaining commits). Occupancy does not "
+        "depend on τ: MOAS medians remained 5.25% (CLN025), 14.85% (AdK), and 37.15% (MBP), above "
+        "the exploration methods at every threshold. Thus the ranking of MOAS versus Random, "
+        "LAST, least-counts, and kNN-AS is not an artifact of the production 40 ps / 200 ps "
+        "choice.",
+        align="justify",
     )
 
     add_h(doc, "3.3 Committed visits are associated with sustained target-basin occupancy", 2)
@@ -1023,37 +1190,164 @@ def build_manuscript():
         doc,
         "Median occupancies for MOAS were 5.25% on CLN025 (IQR 4.65–6.02), 14.85% on AdK "
         "(IQR 7.78–21.34), and 37.15% on MBP (IQR 32.78–39.63), with the three replicates shown "
-        "as points in Figure 4A–C. The AdK MOAS replicate that committed only at 192 ns remained "
+        "as shown in Figure 5A–C. The AdK MOAS replicate that committed only at 192 ns remained "
         "at 0.72% occupancy: commitment without large occupancy is possible, which is why the "
-        "two quantities are reported separately. LAST’s CLN025 occupancy median was 1.66%; its "
-        "MBP median was 0.02%, despite one replicate that reached 26% after committing. kNN-AS "
-        "medians were 0.14%, ~0%, and 0.14% on the three systems.",
+        "two quantities are reported separately. LAST’s CLN025 occupancy median was 1.66%, "
+        "against 5.25% for MOAS, with both methods committing in 3/3. LAST’s MBP median was "
+        "0.02%, despite one replicate that reached 26% after committing at 320 ns. That "
+        "replicate shows that LAST is capable of substantial occupancy when a frontier trajectory "
+        "enters and remains in the basin; it is not a failed method. Median occupancy still "
+        "differs because the other LAST MBP campaigns did not occupy the closed window. kNN-AS "
+        "medians were 0.14%, ~0%, and 0.14% on the three systems. Bootstrap 95% intervals on "
+        "these occupancy medians are in Table 2.",
         align="justify",
     )
     add_p(
         doc,
-        "CV densities show where that occupancy sits. On AdK, MOAS accumulates density inside "
-        "the closed LID–NMP window, whereas LAST remains in the open cloud (Figure 4D). On MBP, "
-        "MOAS occupies the closed domain-distance / hinge-angle basin; LAST density stays near "
-        "the open reference (Figure 4E). Restricting the comparison to campaigns that recorded "
-        "a first hit does not remove the occupancy gap (Figure 4F). Hitting the window is "
+        "CV densities show where that occupancy sits. On AdK, where LAST did not commit, density "
+        "remains in the open LID–NMP cloud, whereas MOAS accumulates inside the closed window "
+        "(Figure 5D). On MBP, pooled LAST density stays near the open reference even though one "
+        "replicate occupied the closed basin at 26% (Figure 5E), because the other two campaigns "
+        "did not. Restricting the comparison to campaigns that recorded "
+        "a first hit does not remove the occupancy gap (Figure 5F). Hitting the window is "
         "therefore not the event that distinguishes the methods; remaining in the basin is. "
         "We describe this as an association between committed visits and sustained occupancy, "
         "not as a claim that commitment causally produces occupancy in the absence of further "
-        "analysis.",
+        "analysis, and not as a claim that LAST cannot occupy the target.",
         align="justify",
     )
     add_fig(
         doc,
-        "fig4_occupancy.png",
-        "Figure 4. Committed visits are associated with sustained target-basin occupancy. "
-        "(A–C) Median occupancy (bars) with three independent replicates (points). (D) AdK "
+        "fig5_occupancy.png",
+        "Figure 5. Committed visits are associated with sustained target-basin occupancy. "
+        "(A–C) Occupancy of three independent replicates (circles), with the median (diamond) and min–max range. (D) AdK "
         "LID–NMP density for LAST (blue) and MOAS (red); dashed lines mark the closed window. "
         "(E) Analogous MBP domain-distance / hinge-angle density. (F) Occupancy restricted to "
         "campaigns that recorded a first hit.",
     )
+    add_p(
+        doc,
+        "Occupancy is the time average of the indicator of W. It therefore mixes how often a "
+        "trajectory enters the window with how long it stays. The latter is the residence-time "
+        "distribution of contiguous sojourns (Supporting Information Figure S2A–C). A committed "
+        "visit is the event that at least one sojourn exceeds τ, equivalently that the longest "
+        "sojourn exceeds τ (Figure S2D–F). Typical visits remain short for every method (median "
+        "sojourn 2–20 ps); the distinction is the tail. The median longest sojourn was 0.34 ns "
+        "for MOAS on CLN025, against 0.15 ns for LAST, 0.05 ns for least-counts, 0.02 ns for "
+        "kNN-AS, 0.03 ns for TAPS, and <0.01 ns for Random (Table 3). On AdK the corresponding "
+        "medians were 1.82 ns (MOAS) and 0.33 ns (least-counts); Random, LAST, and kNN-AS had "
+        "median longest sojourns of 0 because at least two of three campaigns never entered or "
+        "never stayed (one kNN-AS replicate reached 9.8 ns). On MBP they were 36.5 ns (MOAS), "
+        "0.33 ns (kNN-AS), 0.12 ns (LAST), 0.07 ns (least-counts), and 0 (Random). The production "
+        "threshold is one horizontal cut through Figure S2D–F; the ranking of longest sojourns "
+        "does not require choosing that cut.",
+        align="justify",
+    )
+    add_p(
+        doc,
+        "The same occupancy ranking is recovered under neighboring definitions of W "
+        "(Figure S2G–I). Tightening the CLN025 RMSD cutoff from 0.25 to 0.20 nm lowers every "
+        "occupancy but leaves MOAS highest (0.79% versus 0.01% for LAST). Widening to 0.30 or "
+        "0.40 nm does likewise (MOAS 12.4% and 31.9%; LAST 6.0% and 16.5%). On AdK, expanding "
+        "or shrinking the LID/NMP rectangle by 4–8° does not produce a ranking in which an "
+        "exploration method overtakes MOAS at the production window or looser; at −8° the "
+        "window is empty for all methods. On MBP, a tighter closed window still retains 17.1% "
+        "MOAS occupancy against ≤0.02% for the other methods. Occupancy is therefore not an "
+        "artifact of the particular production rectangle.",
+        align="justify",
+    )
+    res_rows = []
+    with (ROOT / "tables" / "residence_time_summary.csv").open(encoding="utf-8") as fh:
+        for rec in csv.DictReader(fh):
+            if rec["method"] == "TAPS":
+                continue
+            mx = rec["median_max_rt"]
+            if mx in ("", None):
+                longest = "—"
+            else:
+                x = float(mx) / 1000.0
+                longest = f"{x:.3f}" if x < 0.1 else f"{x:.2f}"
+            res_rows.append(
+                [
+                    rec["system"],
+                    rec["method"],
+                    longest,
+                    f"{float(rec['median_occupancy']):.2f}",
+                ]
+            )
+    add_table(
+        doc,
+        ["System", "Method", "Median longest residence (ns)", "Occupancy (%)"],
+        res_rows,
+    )
+    add_caption(
+        doc,
+        "Table 3. Threshold-free residence and occupancy (n = 3). Median longest residence is "
+        "the median, over three campaigns, of each campaign’s longest contiguous sojourn in the "
+        "production window W (0 if the campaign never entered). Occupancy is the production "
+        "f_W of Section 2.13. Full sojourn survivals and neighboring-window occupancies are "
+        "Supporting Information Figure S2 and Tables S7–S8.",
+    )
 
-    add_h(doc, "3.4 Contribution of individual objectives to MOAS sampling behavior", 2)
+    add_h(doc, "3.4 Seed selection reallocates from exploration to target-state sampling", 2)
+    add_p(
+        doc,
+        "Seed selection is the policy that implements the sampling objective. Figure 6 asks how "
+        "that policy is used over time on AdK, not which method is fastest. Each map is the same "
+        "LID–NMP plane. The shaded region is the closed-state target window (LID < 114.4°, "
+        "NMP > 41.8°). Selected seeds are colored by adaptive round, from early (blue) to late "
+        "(red). Random, LAST, and MOAS are seed-0 campaigns; kNN-AS is the AdK campaign for which "
+        "per-round seed coordinates were archived (replicate 2).",
+        align="justify",
+    )
+    add_p(
+        doc,
+        "Random seeds remain in the open cloud through late rounds (Figure 6A). LAST seeds track "
+        "the expanding frontier of the visited ensemble (Figure 6B, dashed contour of the sampled "
+        "cloud). kNN-AS spreads into low-density regions and does not concentrate in the closed "
+        "window (Figure 6C). MOAS seeds begin in the open cloud in rounds 1–5, approach the window "
+        "in rounds 6–10, and enrich the closed basin in rounds 11–15 (Figure 6D). The dark line in "
+        "D is the centroid of the six seeds selected in each round: exploration, then transition, "
+        "then target-directed sampling, rather than a jump of points from left to right.",
+        align="justify",
+    )
+    add_p(
+        doc,
+        "That sequence is quantified in Figure 6E–F. The fraction of selected seeds inside the "
+        "target window is not itself the objective: a target-only rule would raise it immediately. "
+        "The complementary coordinate is the median Euclidean distance, in LID–NMP space, from "
+        "the six seeds to the closed reference. MOAS distance decreases over rounds while the "
+        "in-window fraction rises late. Random, LAST, and kNN-AS do not show that reallocation. "
+        "The policy therefore shifts from exploration toward target-state sampling; it does not "
+        "dump seeds into the window from the first round. Figure 6G reconstructs the mean "
+        "novelty, boundary, and target percentile ranks of those six MOAS seeds relative to "
+        "the candidate pool of each round. The mixing weights never change. Novelty percentile "
+        "of selected seeds remains near one in every round, so exploration is not switched off. "
+        "Target percentile is already high in the transition, when the closed basin is still "
+        "rare among candidates, and then declines as the pool itself occupies that basin. A "
+        "relative rank cannot stay exclusive once many windows sit near the target. "
+        "Reallocation is therefore a change in the pool, not a change in the weights.",
+        align="justify",
+    )
+    add_fig(
+        doc,
+        "fig6_seeds.png",
+        "Figure 6. Temporal evolution of seed selection on AdK: from exploration to "
+        "target-state sampling. (A–D) LID–NMP maps for Random, LAST, kNN-AS (replicate 2), and "
+        "MOAS. Grey hexbin: sampled density. Points: selected seeds colored by adaptive round "
+        "(early → late). Shaded rectangle: closed-state target window (LID < 114.4°, NMP > 41.8°). "
+        "LAST (B) includes a dashed contour of the visited cloud. MOAS (D) includes the centroid "
+        "trajectory of the six seeds in each round. (E) Fraction of selected seeds inside the "
+        "target window versus round. (F) Median target distance of those seeds versus round. "
+        "(G) Mean novelty, boundary, and target percentile ranks of the six MOAS seeds, "
+        "recomputed from that round’s candidate pool; the dotted line is the equal-weight mix. "
+        "Shaded bands mark exploration (R1–R5), transition (R6–R10), and target-directed sampling "
+        "(R11–R15). A late rise in (E) with a gradual drop in (F) indicates reallocation toward "
+        "the basin. (G) shows that this is not a change of weights: novelty rank stays high, "
+        "and target rank falls once the pool is itself near the basin.",
+    )
+
+    add_h(doc, "3.5 Contribution of individual objectives to MOAS sampling behavior", 2)
     add_p(
         doc,
         "The preceding sections report full MOAS. Here the three scores are switched on or off "
@@ -1068,7 +1362,11 @@ def build_manuscript():
         "and did not commit (occupancy 0.27% and 0.32%). Novelty+boundary never hit. Target only "
         "committed at 92 ns with 16.8% occupancy; novelty+target committed at 92 ns with 17.9%; "
         "boundary+target committed at 144 ns with 5.0%; full MOAS committed at 103 ns with 14.8% "
-        "(Figure 5A, B). Target proximity is therefore strongly associated with commitment on "
+        "(Figure 7A, C). Occupancy-versus-time traces show that the target-containing mixes "
+        "accumulate closed-window frames after commitment, whereas novelty and boundary remain "
+        "near 1% after a first hit. Restricting occupancy to frames after the committed visit "
+        "gives 28.6% (target), 30.0% (novelty+target), 27.5% (full MOAS), and 15.4% "
+        "(boundary+target). Target proximity is therefore strongly associated with commitment on "
         "this protein. Adding novelty or boundary to target changes occupancy more than it "
         "changes the binary commit call; novelty+target is slightly above full MOAS in occupancy "
         "in this single replicate, so equal three-term mixing is not claimed to be uniquely "
@@ -1081,49 +1379,40 @@ def build_manuscript():
         "6.0% occupancy). Target only committed late (731 ns, 3.8%). Novelty+target hit at "
         "561 ns and committed only at 964 ns, with 0.36% occupancy. Boundary+target hit at "
         "849 ns and did not commit (occupancy ~0%). Full MOAS committed at 443 ns with 28.4% "
-        "occupancy (Figure 5C, D). No single- or two-term mix matches that occupancy. "
-        "Exploration without a target term either fails to hit or, if it commits, occupies "
-        "far less of the 1 μs budget than the three-term mix; a target term without the full "
-        "exploration mix can convert an encounter into a late commit and still leave almost "
-        "no ensemble in the closed basin. The two classes of term are complementary on this "
-        "larger transition.",
+        "occupancy (Figure 7B–D). No single- or two-term mix matches that occupancy. After "
+        "commitment, full MOAS spends 49.9% of remaining frames in the closed basin, compared "
+        "with 9.9% (boundary), 13.5% (target), and 2.9% (novelty+target); the hit-to-commit "
+        "interval is 107 ns for full MOAS versus 404 ns for novelty+target, which converts "
+        "late and still does not occupy the basin. Exploration without a target term either "
+        "fails to hit or, if it commits, occupies far less of the 1 μs budget than the "
+        "three-term mix; a target term without the full exploration mix can convert an "
+        "encounter into a late commit and still leave almost no ensemble in the closed basin. "
+        "The two classes of term are complementary on this larger transition.",
         align="justify",
     )
     add_fig(
         doc,
-        "fig5_ablation.png",
-        "Figure 5. Contribution of individual MOAS objectives (n = 1). (A) AdK committed visit. "
-        "(B) AdK time to commit and occupancy; × indicates no commit. (C–D) MBP commitment and "
-        "occupancy.",
-    )
-    add_p(
-        doc,
-        "Seed locations versus round number on AdK show how that mix is used over time "
-        "(Figure 6). Random and LAST seeds remain in the open LID–NMP cloud through late rounds. "
-        "kNN-AS explores a wide frontier but does not concentrate in the closed window. MOAS "
-        "seeds start in the open cloud (early rounds) and later rounds occupy the closed "
-        "quadrant, coinciding with the rise in rolling occupancy in Figure 2B. The algorithm "
-        "therefore spends early rounds on exploration and later rounds on target-directed "
-        "sampling, rather than performing a pure first-passage search.",
-        align="justify",
-    )
-    add_fig(
-        doc,
-        "fig6_seeds.png",
-        "Figure 6. Seed selection in AdK CV space. Hexbin: sampled density. Points: selected "
-        "seeds colored by round (blue early, red late). Dashed lines: closed window. Only MOAS "
-        "migrates seeds into the closed basin in later rounds.",
+        "fig7_ablation.png",
+        "Figure 7. Contribution of individual MOAS objectives (n = 1). (A, B) Cumulative "
+        "target-basin occupancy versus simulation time on AdK and MBP; diamonds mark the "
+        "committed visit. Dashed lines are single-term mixes, dash-dot two-term mixes, and "
+        "the solid red line is full MOAS. (C) Occupancy versus time to commit as a fraction "
+        "of the budget (open markers did not commit). (D) The same campaigns on the "
+        "three-objective simplex (Novelty–Boundary–Target); marker area is proportional to "
+        "occupancy, filled markers committed (circles, AdK; diamonds, MBP).",
     )
 
-    add_h(doc, "3.5 Exploration coverage and target-state occupancy represent complementary sampling objectives", 2)
+    add_h(doc, "3.6 Exploration coverage and target-state occupancy represent complementary sampling objectives", 2)
     add_p(
         doc,
-        "Figure 7 places every n = 3 campaign on two axes: the filled fraction of a 24 × 24 CV "
+        "Figure 8A–C place every n = 3 campaign on two axes: the filled fraction of a 24 × 24 CV "
         "histogram (coverage) and target-basin occupancy. LAST, kNN-AS, and least-counts occupy "
-        "the high-coverage, low-occupancy region on AdK and MBP. MOAS occupies the high-occupancy "
-        "side at comparable or slightly lower coverage. CLN025 coverage is compressed for all "
-        "methods because the peptide fills few bins of the same 24 × 24 grid; occupancy still "
-        "separates MOAS from the others. The two axes are different sampling objectives, not "
+        "the high-coverage, low-occupancy region on AdK and MBP. That placement is consistent "
+        "with an exploration objective: those methods visit more histogram bins. MOAS occupies "
+        "the high-occupancy side at comparable or slightly lower coverage. CLN025 coverage is "
+        "compressed for all methods because the peptide fills few bins of the same 24 × 24 grid; "
+        "occupancy still ranks MOAS above LAST (medians 5.25% versus 1.66%), while LAST itself "
+        "is well above Random and kNN-AS. The two axes are different sampling objectives, not "
         "proxies for one another.",
         align="justify",
     )
@@ -1133,175 +1422,195 @@ def build_manuscript():
         "treating either axis as a universal score. If the scientific question is whether new "
         "conformational space was visited, coverage and frontier scores remain appropriate. If "
         "the question is whether a predefined target state was established as a sampled basin, "
-        "committed visit and occupancy are the relevant endpoints. Adaptive sampling should be "
-        "evaluated not only by how much of conformational space is explored, but also by whether "
-        "the intended target state is sampled in a committed and sustained manner.",
+        "committed visit and occupancy are the relevant endpoints. The two questions are two "
+        "definitions of success. Changing the definition changes which method looks successful. "
+        "Adaptive sampling should be evaluated not only by how much of conformational space is "
+        "explored, but also by whether the intended target state is sampled in a committed and "
+        "sustained manner.",
         align="justify",
     )
     add_fig(
         doc,
-        "fig7_explore_vs_target.png",
-        "Figure 7. Exploration coverage and target-state occupancy are complementary sampling "
-        "objectives. Each point is one n = 3 campaign. Coverage is the filled fraction of a "
-        "24 × 24 CV histogram. Occupancy is the target-window fraction. MOAS separates on the "
-        "occupancy axis; LAST, kNN-AS, and least-counts separate on coverage for AdK and MBP.",
+        "fig8_explore_vs_target.png",
+        "Figure 8. Exploration coverage and target-state occupancy are complementary sampling "
+        "objectives. Each panel is one protein; each point is one n = 3 campaign. Lines join "
+        "each campaign to the method median (diamond). Coverage is the filled "
+        "fraction of a 24 × 24 CV histogram. Occupancy is the target-window fraction. MOAS "
+        "separates on the occupancy axis; LAST, kNN-AS, and least-counts separate on coverage "
+        "for AdK and MBP.",
     )
 
     add_h(doc, "4. Discussion", 1)
-    add_p(
+    add_p_markup(
         doc,
-        "Adaptive sampling is usually discussed in terms of first-hit time, state discovery, "
-        "and conformational coverage. Those quantities answer where a trajectory went and how "
-        "soon it touched a labeled region. For protein transitions that terminate in a "
-        "metastable basin, however, entering the target window once does not mean that the "
-        "target state has been sampled. Figure 2 shows campaigns that reach the window early, "
-        "leave it, and finish with essentially no target-basin occupancy. The useful distinction "
-        "is therefore among an encounter, a commitment, and sustained occupancy. First-hit time "
-        "is useful for characterizing target encounters, but it is insufficient as a standalone "
-        "measure of successful target-state sampling. When the scientific aim is an ensemble of "
-        "the target conformation, success has to include both whether the window was entered and "
-        "whether sampling continued after that entry. That two-level reading is the evaluation "
-        "framework used in this paper.",
+        "The central result of this study is not that MOAS universally accelerates adaptive "
+        "sampling, but that **first-hit time alone does not adequately define successful sampling "
+        "of a target conformational state**. A trajectory can enter a predefined target window "
+        "early, leave it rapidly, and contribute almost no subsequent sampling to that state. "
+        "The distinction among first hit, committed visit, and target-basin occupancy therefore "
+        "separates three different levels of outcome: encounter, stabilization, and sustained "
+        "sampling. Figure 2 illustrates why these quantities should not be collapsed into a "
+        "single measure. First-hit time remains useful for describing how rapidly a target "
+        "region is encountered, but when the scientific objective is to obtain an ensemble of a "
+        "metastable target state, successful sampling must also account for whether the "
+        "trajectory remains in that state and accumulates meaningful residence time. This "
+        "distinction provides the basis for the evaluation framework used throughout this study.",
         align="justify",
     )
-    add_p(
+    add_p_markup(
         doc,
-        "MOAS is designed to convert those transient encounters into committed sampling, not by "
-        "searching more aggressively for the target, but by keeping three incommensurate aims in "
-        "play at once (Figures 3–6). Novelty penalizes seeds that sit in already well-sampled "
-        "regions. Boundary, in the LAST sense, pushes the trajectory cloud into new conformational "
-        "territory. Target proximity keeps later rounds from remaining indefinitely far from the "
-        "basin of interest. The three scores are not a union of three “high-score patches”: "
-        "percentile normalization maps each raw scale onto a relative rank so that a dense-cloud "
-        "term, a frontier term, and a distance-to-target term can be mixed without one unit "
-        "dominating the others. Figure 6 shows how that mix is used over time. Early rounds "
-        "place seeds where novelty and boundary are high and the cloud is still in the open or "
-        "unfolded region. As configurations approach the target, the target-proximity rank of "
-        "those candidates rises, and seed selection migrates toward the basin. The mechanism is "
-        "therefore a dynamic balance between exploration and target-directed sampling. That "
-        "balance also explains a pattern in the ablation: a target-only score can reach the "
-        "window on some systems, and novelty plus target can convert a late MBP encounter into "
-        "a commit, yet the full mix is associated with higher occupancy, because exploration "
-        "terms continue to supply new approaches to the basin rather than locking onto the "
-        "first contact.",
+        "MOAS was designed to align seed selection with this definition of success while "
+        "retaining the exploratory behavior of adaptive sampling. Its three components—novelty, "
+        "LAST-style boundary exploration, and target proximity—address complementary aspects of "
+        "the sampling problem. Novelty and boundary scores promote exploration of poorly "
+        "represented or frontier regions, whereas target proximity provides an explicit mechanism "
+        "for directing sampling toward the basin of interest. Equal percentile normalization "
+        "places these otherwise incommensurate scores on a common relative scale, while the "
+        "diversity constraint prevents the selected seeds from collapsing onto a single local "
+        "region. Importantly, the apparent shift from exploration toward target-directed "
+        "sampling does not require time-dependent weights. As the sampled ensemble evolves, the "
+        "relative ranks of candidate configurations change, and configurations near the target "
+        "can become increasingly competitive with frontier configurations. Figure 6 illustrates "
+        "this behavior: early selection remains distributed across the open-state ensemble, "
+        "whereas later rounds become progressively enriched near the target basin. Thus, the "
+        "balance between exploration and target-directed sampling emerges from the evolving "
+        "candidate pool rather than from an explicitly scheduled change in objective weights. "
+        "The ablation results further suggest that target proximity is important for achieving "
+        "commitment, whereas retaining exploratory objectives can improve the accumulation of "
+        "target-basin occupancy.",
         align="justify",
     )
-    add_p(
+    add_p_markup(
         doc,
-        "The comparison with existing methods is then a comparison of sampling objectives, not "
-        "a claim that MOAS supersedes them. Random supplies an unbiased restart baseline and "
-        "carries no conformational preference. Least-counts prefers under-sampled histogram "
-        "bins. LAST emphasizes the frontier of the visited cloud. kNN-AS uses local neighborhood "
-        "structure in a low-density construction to the same exploratory end. All four implement "
-        "exploration-oriented seed selection. They are well posed for the question “where has "
-        "the trajectory not yet been?” The present results indicate that that question is not "
-        "the same as “where is the target metastable basin?” An exploration objective is not a "
-        "target-state sampling objective. MOAS adds a target-directed term while retaining "
-        "novelty and boundary, so it does not abandon exploration. It extends exploration-oriented "
-        "adaptive sampling toward target-state stabilization. Figure 7 makes the same point "
-        "geometrically: coverage and occupancy separate campaigns along different axes and should "
-        "be read as complementary metrics, not as interchangeable summaries of a single "
-        "performance score.",
+        "The comparison with existing adaptive strategies should therefore be interpreted as a "
+        "comparison of **sampling objectives rather than a universal performance ranking**. LAST, "
+        "in particular, was not uniformly inferior to MOAS: it achieved commitment in all "
+        "CLN025 replicates and produced high occupancy in one MBP campaign. These results are "
+        "consistent with the fact that frontier exploration can, depending on the underlying "
+        "landscape, naturally lead into and remain within a target basin. Random provides an "
+        "unbiased restart reference, least-counts emphasizes under-sampled regions, and both "
+        "LAST and kNN-AS favor exploration of poorly represented regions of conformational "
+        "space. These strategies are appropriate when the principal question is where the "
+        "trajectory has not yet explored. The present results instead address the complementary "
+        "question of whether a predefined target state has been sufficiently sampled. MOAS "
+        "extends this exploratory framework by adding target proximity, rather than replacing "
+        "exploration with purely target-directed selection. The separation between coverage and "
+        "occupancy in Figure 8 further emphasizes that exploration and target-state accumulation "
+        "are related but distinct objectives.",
         align="justify",
     )
-    add_p(
+    add_p_markup(
         doc,
-        "Committed sampling is therefore offered as an evaluation framework, not only as a "
-        "score on three proteins. It is aimed at problems in which a metastable ensemble is "
-        "the object of interest: protein conformational transitions, ligand-induced shifts, "
-        "enzyme open/closed cycles, functional states of membrane proteins, particular basins "
-        "of intrinsically disordered proteins, and other rare-event settings where a labeled "
-        "target state must be accumulated rather than merely touched. Target-state sampling "
-        "should be evaluated at two levels: discovery and stabilization. Discovery corresponds "
-        "to first hit; stabilization corresponds to a committed visit and to subsequent ensemble "
-        "accumulation. The commitment time itself is not a universal constant. The 40 ps sojourn "
-        "used for CLN025 and the 200 ps sojourn used for AdK and MBP are not a contradiction; "
-        "they follow from the kinetic scale of each system. A commitment criterion should be "
-        "system-specific and physically motivated, then held fixed across methods so that the "
-        "comparison remains a comparison of sampling, not of thresholds.",
+        "This distinction also motivates the broader use of **committed sampling as an "
+        "evaluation framework**. The framework is applicable whenever the scientific objective "
+        "is to accumulate sampling within a defined metastable state rather than merely detect "
+        "its existence. Under this framework, first hit represents discovery, whereas a "
+        "committed visit and subsequent occupancy represent stabilization and ensemble "
+        "accumulation. The commitment threshold should not be regarded as a universal constant. "
+        "In the present study, 40 ps was used for CLN025 and 200 ps for AdK and MBP to reflect "
+        "differences in the characteristic timescales of the systems; critically, the same "
+        "criterion was applied to all methods within each system. Re-scoring the same "
+        "trajectories over a neighborhood of τ (Supporting Information Figure S1 and Table S6) "
+        "left the ranking of MOAS versus the exploration methods unchanged. MOAS remained the "
+        "only method with 3/3 committed replicates on all three proteins at the production "
+        "thresholds, and it retained that count at every neighboring τ except AdK at 500 ps "
+        "(2/3). Occupancy, which does not depend on τ, preserved the same order. Commitment is "
+        "one slice of the residence-time distribution: a committed visit occurs when the longest "
+        "sojourn exceeds τ, while occupancy is the time average of those sojourns (Supporting "
+        "Information Figure S2A–F and Table 3). Recomputing occupancy under neighboring "
+        "definitions of W (Figure S2G–I) left MOAS highest at the production window and at "
+        "every looser or moderately tighter cutoff that is still populated. More broadly, "
+        "a physically motivated, system-specific commitment criterion can be incorporated into "
+        "benchmarks of protein conformational transitions, ligand-linked state changes, enzyme "
+        "open/closed dynamics, membrane-protein conformational switching, and other rare-event "
+        "problems in which persistence within a target state is scientifically meaningful.",
         align="justify",
     )
-    add_p(
+    add_p_markup(
         doc,
-        "Several limits follow directly from that framing. First, MOAS assumes a predefined "
-        "target basin in CV space, so it is a target-directed method rather than a procedure for "
-        "discovering unknown states. Automated recognition of metastable basins would widen its "
-        "scope. Second, the CVs used here—Cα-RMSD and Rg for CLN025, LID/NMP angles for AdK, "
-        "domain distance and hinge angle for MBP—are still chosen by the investigator. "
-        "Performance may depend on whether those coordinates resolve the relevant transition. "
-        "Learned representations (time-lagged or variational autoencoders, graph embeddings, "
-        "Koopman or TICA-type features) are a natural next step. Third, equal one-third weights "
-        "on novelty, boundary, and target are a transparent, reproducible baseline, not a claim "
-        "of optimality across proteins. Adaptive weights that respond to sampling stage, "
-        "uncertainty, target distance, occupancy, or redundancy among objectives remain open. "
-        "Fourth, the study comprises three proteins, n = 3 campaigns per main-text method, and "
-        "n = 1 ablation runs. That design is sufficient to show consistent behavior and "
-        "methodological feasibility; it is not sufficient for a general statistical conclusion. "
-        "Larger replicate sets, a broader range of protein classes, and a standardized committed-"
-        "sampling benchmark would be required before the framework can be treated as universal.",
+        "Several limitations define the current scope of the method. First, MOAS assumes a "
+        "predefined target basin in CV space and is therefore a target-directed sampler rather "
+        "than a method for discovering unknown metastable states. Second, the CVs used here were "
+        "selected a priori: Cα-RMSD and Rg for CLN025, LID/NMP angles for AdK, and domain "
+        "distance and hinge angle for MBP. The effectiveness of target-directed sampling may "
+        "therefore depend on whether these coordinates adequately resolve the relevant "
+        "conformational transition. Integration with learned representations, such as "
+        "time-lagged or variational embeddings, graph-based features, or Koopman/TICA-type "
+        "coordinates, could reduce this dependence. Third, the equal weighting of the three "
+        "MOAS objectives is intended as a transparent and reproducible baseline rather than an "
+        "optimized universal choice; adaptive weighting based on sampling stage, uncertainty, "
+        "target distance, occupancy, or objective redundancy remains to be explored. Finally, "
+        "the present benchmark contains three protein systems with three independent campaigns "
+        "per main-text method, while the ablation analysis uses single campaigns. These data "
+        "establish consistent behavior across the tested systems but do not justify universal "
+        "claims about MOAS performance. Larger replicate sets, broader protein classes, and "
+        "standardized committed-sampling benchmarks will be needed to determine the generality "
+        "and statistical robustness of this framework.",
         align="justify",
     )
 
     add_h(doc, "5. Conclusions", 1)
     add_p(
         doc,
-        "First hit should not be treated as sufficient evidence of successful adaptive sampling "
-        "of a rare conformational state: a trajectory can encounter a target window and leave "
-        "without establishing that basin as a sampled ensemble. MOAS addresses that gap by ranking "
-        "seeds on novelty, boundary exploration, and target proximity, mixed by equal percentile "
-        "ranks and subject to a diversity constraint, so that exploration of poorly sampled "
-        "regions is kept in play while sampling is progressively directed toward the intended "
-        "state. Across CLN025 folding, the AdK open-to-closed transition, and apo MBP domain "
-        "closure, this mix converted transient encounters into committed visits in every "
-        "replicate and was associated with higher target-basin occupancy than matched Random, "
-        "LAST, least-counts, and kNN-AS campaigns. The practical implication is to score "
-        "adaptive sampling of target states by committed residence and persistent occupancy, "
-        "and to treat exploration and target-directed stabilization as complementary objectives "
-        "rather than as a single performance number.",
+        "The contribution of this work is a change in what success means for adaptive sampling "
+        "of a rare conformational state. First hit records an encounter and is not sufficient "
+        "evidence that the target basin has been sampled. A committed visit and persistent "
+        "occupancy record whether that basin was established as an ensemble. MOAS operationalizes "
+        "that definition by ranking seeds on novelty, boundary exploration, and target proximity, "
+        "mixed by equal percentile ranks and subject to a diversity constraint, so that exploration "
+        "of poorly sampled regions is kept in play while sampling is progressively directed toward "
+        "the intended state. Across CLN025 folding, the AdK open-to-closed transition, and apo MBP "
+        "domain closure, this mix was associated with a committed visit in every replicate. LAST "
+        "and least-counts achieved the same commit count on CLN025; LAST also produced a "
+        "high-occupancy MBP campaign. Those results are not a demonstration that MOAS is faster, "
+        "or that it supersedes LAST. They show that an exploration objective and a target-state "
+        "sampling objective are different questions, and that the ranking of methods depends on "
+        "which question is asked. The same ranking is recovered from the full residence-time "
+        "distribution and from occupancy recomputed under neighboring definitions of W. The "
+        "practical implication is to score adaptive sampling of "
+        "target states by committed residence and persistent occupancy, and to treat exploration "
+        "and target-directed stabilization as complementary objectives rather than as a single "
+        "performance number.",
+        align="justify",
+    )
+
+    add_h(doc, "Associated Content", 1)
+    add_h(doc, "Supporting Information", 2)
+    add_p(
+        doc,
+        "Simulation parameters (Table S1); replicate-level hit, commit, occupancy, and coverage "
+        "(Tables S2–S5); ablation numerics (Table S4); commitment-threshold robustness "
+        "(Figure S1, Table S6); residence-time distributions and neighboring-window occupancy "
+        "(Figure S2, Tables S7–S8); campaign tags (S11). Ranking code, CV JSON, and commitment "
+        "functions corresponding to this article are at https://github.com/liying0128/TAPS "
+        "(directory paper/protocol/).",
+        first_line=False,
+        align="justify",
+    )
+
+    add_h(doc, "Data and Software Availability", 1)
+    add_p(
+        doc,
+        "The data underlying this study are available in the published article, the Supporting "
+        "Information, and at https://github.com/liying0128/TAPS. The scripts and code used to "
+        "generate and analyze the results are in the same repository. Ranking (novelty, LAST "
+        "frontier, target proximity, equal-percentile mixing, diversity-constrained seed "
+        "selection), CV window definitions, and commitment / occupancy / residence-time "
+        "functions are deposited in paper/protocol/. Production adaptive loops are "
+        "taps-gromacs/stage13_cln025_discover.py (CLN025), moas-adk/stage_adk_discover.py "
+        "(AdK), and moas-mbp/stage_mbp_discover.py (MBP). Machine-readable numerical tables "
+        "underlying Figures 2–8 and S1–S2 are in paper/tables/. Custom code is released under "
+        "the MIT license. MD was run with open-source GROMACS 2024.3 (production GPUs) and "
+        "checked with GROMACS 2025.1, AMBER99SB-ILDN and TIP3P. Python 3 with NumPy was used "
+        "for ranking and CV evaluation. Full GROMACS trajectories and checkpoints are not "
+        "stored on GitHub (hundreds of GB); they are available from the corresponding author "
+        "upon request. Campaign tags are listed in Supporting Information section S11.",
         align="justify",
     )
 
     add_acknowledgements(doc)
 
-    add_h(doc, "Notes for revision", 1)
-    add_p(
-        doc,
-        "1. Figures now include the completed MBP Nov+Tgt ablation (commit 964 ns, occupancy "
-        "0.36%). Re-run python3 paper/make_figures.py && python3 paper/build_docx.py after any "
-        "further history edits.",
-        first_line=False,
-    )
-    add_p(
-        doc,
-        "2. SI sensitivity (weights, number of seeds, diversity radius) still needs dedicated "
-        "campaigns; they cannot be recovered from the present trajectories.",
-        first_line=False,
-    )
-    add_p(
-        doc,
-        "3. Figures are matplotlib drafts. Replace Fig. 1 with a vector schematic before submission. "
-        "Kaplan–Meier curves and bootstrap CIs on time-to-commit can be added from n3_metrics.csv "
-        "without new MD.",
-        first_line=False,
-    )
-    add_p(
-        doc,
-        "4. Do not mix the unrelated AdK 1000 ns run on lan55 (adk-r1, other paper) into these tables.",
-        first_line=False,
-    )
-
-    add_h(doc, "Data locations", 1)
-    add_p(
-        doc,
-        "Per-replicate numbers: paper/tables/n3_metrics.csv and ablation_metrics.csv. "
-        "Campaign histories: taps-gromacs/analysis/cln025_unfolded/campaigns, "
-        "moas-adk/analysis/adk_open/campaigns, moas-mbp/analysis/mbp_open/campaigns, "
-        "plus copies of lan55 histories in paper/data/hist_55. Figure script: paper/make_figures.py.",
-        first_line=False,
-        align="justify",
-    )
-
-    doc.save(OUT_MS)
+    save_watched(doc, OUT_MS)
     print("wrote", OUT_MS)
 
 
@@ -1323,6 +1632,14 @@ def fmt_pct(v, digits=3):
     except (TypeError, ValueError):
         return "—"
     return f"{100 * x:.{digits}f}"
+
+
+def fmt_tau_cell(rec):
+    n_c, n = int(rec["n_commit"]), int(rec["n"])
+    ttc = rec.get("median_ttc")
+    if ttc in ("", None):
+        return f"{n_c}/{n}"
+    return f"{n_c}/{n} ({float(ttc):.1f})"
 
 
 def build_si():
@@ -1382,7 +1699,9 @@ def build_si():
         "k = 5 nearest neighbors, score ||Σ (z_j − q)||; no target term. Least-counts: inverse "
         "histogram count of the candidate’s CV bin. LAST: frontier / boundary score of the "
         "visited set. Random: uniform among eligible windows subject to the same diversity rule "
-        "where implemented.",
+        "where implemented. Ranking code, CV JSON (AdK LID/NMP and MBP domain/hinge windows), "
+        "and commitment functions are deposited at https://github.com/liying0128/TAPS in "
+        "paper/protocol/ (MIT license).",
         first_line=False,
         align="justify",
     )
@@ -1419,7 +1738,7 @@ def build_si():
         ["System", "Method", "Rep", "Hit (ns)", "Commit (ns)", "Occupancy (%)", "Coverage (%)"],
         rows,
     )
-    add_caption(doc, "Table S2. Main-text n = 3 campaigns (TAPS omitted; see Table S6).")
+    add_caption(doc, "Table S2. Main-text n = 3 campaigns (TAPS omitted; see Table S5).")
 
     add_h(doc, "S3. First-hit data", 1)
     add_p(
@@ -1427,8 +1746,10 @@ def build_si():
         "First hit is reported for completeness and is not the primary endpoint. Several "
         "campaigns hit and never committed (transient-only): CLN025 Random (2 hits / 0 commits), "
         "CLN025 kNN-AS (3/1), AdK Random (1/0), AdK LAST (1/0), AdK least-counts (3/2), "
-        "MBP Random (1/0), MBP LAST (2/1), MBP least-counts (3/1), MBP kNN-AS (3/2). MOAS "
-        "converted every hit into a commit on all three systems (9/9).",
+        "MBP Random (1/0), MBP LAST (2/1), MBP least-counts (3/1), MBP kNN-AS (3/2). LAST and "
+        "least-counts converted every CLN025 hit into a commit (3/3). MOAS converted every hit "
+        "into a commit on all three systems (9/9). Those counts are reported as conversion under "
+        "each objective, not as a ranking in which LAST is the losing method.",
         first_line=False,
         align="justify",
     )
@@ -1436,19 +1757,13 @@ def build_si():
     add_h(doc, "S4. Representative CV traces", 1)
     add_p(
         doc,
-        "Figure 2 of the main text already shows rolling target occupancy for CLN025 (TAPS / "
-        "LAST / MOAS) and AdK (Random / MOAS). Figure 4D–E shows the corresponding two-dimensional "
-        "densities for AdK and MBP. Additional seed-level CV trajectories live in each campaign’s "
-        "cvs.npz (keys: CLN025 t_ps, rmsd, rg; AdK t_ps, lid, nmp, closed; MBP t_ps, dist, theta, "
-        "closed). They can be replotted without new MD.",
+        "Rolling target occupancy for CLN025 (TAPS / LAST / MOAS) and AdK (Random / MOAS) is "
+        "Figure 2 of the main text. Two-dimensional CV densities for AdK and MBP are Figure 5D–E. "
+        "Additional seed-level CV trajectories live in each campaign’s cvs.npz (keys: CLN025 "
+        "t_ps, rmsd, rg; AdK t_ps, lid, nmp, closed; MBP t_ps, dist, theta, closed). They can be "
+        "replotted without new MD.",
         first_line=False,
         align="justify",
-    )
-    add_fig(
-        doc,
-        "fig2_hit_vs_commit.png",
-        "Figure S1. Same as main-text Figure 2, reproduced here so that SI readers have the "
-        "first-hit versus occupancy comparison next to Tables S2–S6.",
     )
 
     add_h(doc, "S5. kNN-AS full results", 1)
@@ -1490,69 +1805,61 @@ def build_si():
                 [
                     rec["system"],
                     rec["combo"],
-                    rec["tag"],
                     fmt_ns(rec["hit_ns"]),
                     fmt_ns(rec["commit_ns"]),
+                    fmt_ns(rec.get("lag_ns")),
                     fmt_pct(rec["occupancy"]),
-                    "yes" if rec["complete"] == "True" else "no",
+                    fmt_pct(rec.get("post_commit_occ")),
+                    fmt_pct(rec.get("late_occ")),
                 ]
             )
     add_table(
         doc,
-        ["System", "Combination", "Tag", "Hit (ns)", "Commit (ns)", "Occupancy (%)", "Complete"],
+        [
+            "System",
+            "Combination",
+            "Hit (ns)",
+            "Commit (ns)",
+            "Hit→commit (ns)",
+            "Occupancy (%)",
+            "After commit (%)",
+            "Last 25% (%)",
+        ],
         ab_rows,
     )
-    add_caption(doc, "Table S4. Ablation campaigns (n = 1). All combinations completed the budget.")
-    add_fig(
+    add_caption(
         doc,
-        "fig5_ablation.png",
-        "Figure S2. Ablation figure (same as main-text Figure 5).",
+        "Table S4. Ablation campaigns (n = 1). All combinations completed the budget. "
+        "After commit is the closed-window fraction of frames after the committed visit. "
+        "Last 25% is the occupancy of new frames in the final quarter of the budget. Occupancy "
+        "trajectories and the three-objective simplex are Figure 7 of the main text.",
     )
 
-    add_h(doc, "S7. Seed-selection mechanism (extra copy)", 1)
+    add_h(doc, "S7. Seed-selection mechanism", 1)
     add_p(
         doc,
-        "Selected seeds store only the mixed score in seeds_round*.json, not the three raw "
-        "objectives. Figure 6 therefore uses seed CV coordinates versus round index, which are "
-        "sufficient to show late-round migration into the AdK closed window for MOAS only. "
-        "The three raw ranks can be recomputed from cvs.npz if a future revision needs an "
-        "objective-space plot.",
-        first_line=False,
-        align="justify",
-    )
-    add_fig(
-        doc,
-        "fig6_seeds.png",
-        "Figure S3. AdK seed locations versus round (same as main-text Figure 6).",
-    )
-    add_fig(
-        doc,
-        "fig7_explore_vs_target.png",
-        "Figure S4. Coverage versus target occupancy (same as main-text Figure 7). Exploration "
-        "methods and MOAS occupy different quadrants.",
-    )
-
-    add_h(doc, "S8. Parameter sensitivity (not yet run)", 1)
-    add_p(
-        doc,
-        "The outline lists SI figures for objective-weight sensitivity, seed-number sensitivity, "
-        "and diversity-constraint sensitivity. Those campaigns have not been launched. They "
-        "require new adaptive MD, not post-processing. Until they exist, this section is a "
-        "placeholder: default weights are equal percentiles; default seeds per round are 6; "
-        "diversity is the greedy exclusion radius used in stage_*_discover.py.",
+        "Selected seeds store the mixed score in the per-round seed records, not the three raw "
+        "objectives. Figure 6 of the main text shows the AdK seed maps, target-window seed "
+        "fraction, target distance, and the novelty / boundary / target percentile ranks "
+        "recomputed from each round’s candidate pool, matching the production windowing "
+        "(50 ps windows, 10 ps stride) and the same scoring functions used in the AdK discover "
+        "loop. Window indices in seeds_round*.json match the rebuilt candidate arrays in every "
+        "round. Coverage versus occupancy for the n = 3 campaigns is Figure 8 of the main text.",
         first_line=False,
         align="justify",
     )
 
-    add_h(doc, "S9. TAPS on CLN025 (additional comparison)", 1)
+    add_h(doc, "S8. TAPS on CLN025 (additional comparison)", 1)
     add_p(
         doc,
-        "TAPS is a target-aware adaptive method used in earlier CLN025 work in this repository. "
+        "TAPS is a target-aware adaptive method previously applied to CLN025. "
         "It is not a main-text baseline. Under the same 82 ns folded-discovery protocol it hit "
         "the RMSD < 0.25 nm window in 3/3 replicates and committed in 1/3 (seed 1 at 80.2 ns). "
         "Occupancies were 0.24%, 0.67%, and 0.09%. This is the canonical transient-encounter "
         "example in Figure 2A: a fast first hit that does not become persistent folded sampling. "
-        "MOAS on the same protein committed in 3/3 with occupancy 4.0–6.8%.",
+        "On the same protein LAST also committed in 3/3 (occupancy median 1.66%). MOAS committed "
+        "in 3/3 with occupancy 4.0–6.8%. The SI comparison is therefore TAPS as a same-loop "
+        "target-aware control, not a claim that MOAS supersedes LAST.",
         first_line=False,
         align="justify",
     )
@@ -1577,22 +1884,210 @@ def build_si():
     )
     add_caption(doc, "Table S5. CLN025 TAPS replicates (supplementary only).")
 
-    add_h(doc, "S10. Occupancy densities", 1)
-    add_fig(
+    add_h(doc, "S9. Commitment-threshold robustness", 1)
+    add_p(
         doc,
-        "fig4_occupancy.png",
-        "Figure S5. Occupancy bars and CV densities (same as main-text Figure 4).",
+        "The production commitment thresholds (τ = 40 ps on CLN025; 200 ps on AdK and MBP) are "
+        "system-specific protocol choices, not universal constants. To test whether ranking by "
+        "committed sampling depends on that choice, every finished n = 3 campaign was re-scored "
+        "from its existing cvs.npz trajectory at neighboring sojourns. No additional MD was run. "
+        "CLN025 used 20, 40, 60, and 80 ps. AdK and MBP used 100, 200, 300, and 500 ps. "
+        "CLN025 commitment is a contiguous sojourn whose duration t_end − t_start + Δt ≥ τ, "
+        "matching the main text. AdK and MBP use the production implementation: at least "
+        "round(τ/Δt) consecutive frames inside W, with Δt = 2 ps. Occupancy is the fraction of "
+        "pooled frames inside W and does not depend on τ.",
+        first_line=False,
+        align="justify",
+    )
+    add_p(
+        doc,
+        "Figure S1 reports committed fraction, median time-to-commit among campaigns that "
+        "committed, and median occupancy versus τ. The dotted vertical line is the production "
+        "threshold. Table S6 lists the same numbers: each cell is committed replicates out of "
+        "three, with the median time-to-commit (ns) in parentheses when at least one campaign "
+        "committed. Columns τ₁–τ₄ are 20/40/60/80 ps for CLN025 and 100/200/300/500 ps for AdK "
+        "and MBP; the production threshold is τ₂. MOAS remained 3/3 on CLN025 at every τ, 3/3 "
+        "on AdK except 2/3 at 500 ps, and 3/3 on MBP at every τ. Exploration methods either "
+        "matched MOAS only at the milder CLN025 thresholds (LAST and least-counts at 20–40 ps) "
+        "or remained below 3/3. Occupancy ranking is unchanged because occupancy does not depend "
+        "on τ (MOAS medians 5.25%, 14.85%, and 37.15%). The conclusion that MOAS converts "
+        "encounters into committed sampling more consistently than Random, LAST, least-counts, "
+        "or kNN-AS is therefore not manufactured by the production 40 ps / 200 ps choice.",
+        first_line=False,
+        align="justify",
     )
     add_fig(
         doc,
-        "fig3_benchmark.png",
-        "Figure S6. Cross-system committed-success matrix (same as main-text Figure 3).",
+        "figS1_commit_threshold.png",
+        "Figure S1. Commitment-threshold robustness from existing trajectories (no new MD). "
+        "(A–C) Committed fraction versus τ on CLN025, AdK, and MBP (n = 3). (D–F) Median "
+        "time-to-commit among campaigns that committed (log scale); a method is omitted at a "
+        "threshold where no replicate committed. (G–I) Median target-basin occupancy, which is "
+        "independent of τ by construction (values ≤ 0.001% are plotted at 0.001%). The dotted "
+        "vertical line is the production threshold (40 ps on CLN025; 200 ps on AdK and MBP). "
+        "TAPS is shown only for CLN025.",
+        width=16.2,
+    )
+    tau_map = {}
+    with (ROOT / "tables" / "commit_threshold_summary.csv").open(encoding="utf-8") as fh:
+        for rec in csv.DictReader(fh):
+            tau_map[(rec["system"], rec["method"], rec["tau_ps"])] = rec
+    tau_rows = []
+    tau_order = {
+        "CLN025": ["20.0", "40.0", "60.0", "80.0"],
+        "AdK": ["100.0", "200.0", "300.0", "500.0"],
+        "MBP": ["100.0", "200.0", "300.0", "500.0"],
+    }
+    for sys in ("CLN025", "AdK", "MBP"):
+        methods = ["Random", "LAST", "Least-counts", "kNN-AS", "MOAS"] + (["TAPS"] if sys == "CLN025" else [])
+        for m in methods:
+            recs = [tau_map[(sys, m, t)] for t in tau_order[sys]]
+            occ = recs[0]["median_occupancy"]
+            tau_rows.append(
+                [sys, m]
+                + [fmt_tau_cell(r) for r in recs]
+                + [f"{float(occ):.2f}"]
+            )
+    add_table(
+        doc,
+        ["System", "Method", "τ₁", "τ₂", "τ₃", "τ₄", "Occupancy (%)"],
+        tau_rows,
+    )
+    add_caption(
+        doc,
+        "Table S6. Commitment versus sojourn threshold. Each cell is committed replicates / 3 "
+        "(median time-to-commit in ns among campaigns that committed). τ₁–τ₄ are 20, 40, 60, "
+        "and 80 ps for CLN025 and 100, 200, 300, and 500 ps for AdK and MBP. Production "
+        "thresholds are τ₂. Occupancy is independent of τ.",
+    )
+
+    add_h(doc, "S10. Residence times and neighboring windows", 1)
+    add_p(
+        doc,
+        "Occupancy f_W is the fraction of frames inside the production target window. A reviewer "
+        "may ask whether that window, or the commitment threshold τ, manufactures the result. "
+        "This section reuses the same cvs.npz trajectories with no additional MD. Each contiguous "
+        "sojourn inside the production W is a residence time T, scored with the production "
+        "duration definition (CLN025: t_end − t_start + Δt; AdK/MBP: n_frames × 2 ps). "
+        "Figure S2A–C shows the empirical survival P(T ≥ t), averaged over the three campaigns "
+        "(a campaign with no visit contributes 0, so each replicate has equal weight). "
+        "Figure S2D–F shows the longest sojourn of each campaign; the dotted line is the "
+        "production τ. A committed visit is the event that this longest sojourn is ≥ τ, so "
+        "commitment is one horizontal cut through D–F rather than a separate endpoint. "
+        "Typical sojourns are short for every method (median 2–20 ps). What differs is the "
+        "tail: the median longest sojourn is 342 ps (MOAS), 152 ps (LAST), and 2 ps (Random) "
+        "on CLN025; 1.82 ns, 0.33 ns, and 0 on AdK; 36.5 ns, 0.12 ns, and 0 on MBP "
+        "(Table S7; main-text Table 3).",
+        first_line=False,
+        align="justify",
+    )
+    add_p(
+        doc,
+        "Figure S2G–I recomputes occupancy under neighboring definitions of W. CLN025 uses "
+        "RMSD cutoffs 0.15, 0.20, 0.25 (production), 0.30, and 0.40 nm. AdK expands or shrinks "
+        "the closed LID/NMP rectangle by Δ = −8, −4, 0, +4, +8 degrees. MBP uses paired shifts "
+        "of the domain-distance and hinge-angle thresholds "
+        "(−0.06 nm/−6°, −0.03 nm/−3°, production, +0.03 nm/+3°, +0.06 nm/+6°), labeled −2 to +2. "
+        "MOAS remains the highest occupancy at the production window and at every looser or "
+        "moderately tighter cutoff that is still populated. At the tightest CLN025 (0.15 nm) and "
+        "AdK (−8°) settings the window is empty for all methods.",
+        first_line=False,
+        align="justify",
     )
     add_fig(
         doc,
-        "fig1_workflow.png",
-        "Figure S7. MOAS workflow schematic (same as main-text Figure 1), included so the SI "
-        "can be read on its own.",
+        "figS2_residence.png",
+        "Figure S2. Residence times and neighboring-window occupancy (existing trajectories; "
+        "no new MD). (A–C) Mean of three campaign-wise empirical survivals P(T ≥ t) of contiguous "
+        "sojourns in the production window W; campaigns with no visit contribute 0. The dotted "
+        "vertical line is the production commitment threshold τ. (D–F) Longest sojourn of each "
+        "replicate (circles) and the median of those three values (diamond); zeros are plotted "
+        "at 1 ps. The dotted horizontal line is τ. (G–I) Median occupancy under neighboring "
+        "definitions of W; the dotted vertical line is the production window. TAPS is shown "
+        "only for CLN025. Values ≤ 0.001% are plotted at 0.001%.",
+        width=16.2,
+    )
+    res_si = []
+    with (ROOT / "tables" / "residence_time_summary.csv").open(encoding="utf-8") as fh:
+        for rec in csv.DictReader(fh):
+            def _num(key, scale=1.0, digits=1):
+                v = rec[key]
+                if v in ("", None):
+                    return "—"
+                return f"{float(v) * scale:.{digits}f}"
+
+            p = rec["p_sojourn_ge_tau"]
+            p_s = "—" if p in ("", None) else f"{float(p):.3f}"
+            res_si.append(
+                [
+                    rec["system"],
+                    rec["method"],
+                    rec["n_sojourns"],
+                    _num("median_n_sojourns", digits=0),
+                    _num("median_rt"),
+                    _num("mean_rt"),
+                    _num("median_max_rt"),
+                    p_s,
+                    f"{float(rec['median_occupancy']):.2f}",
+                ]
+            )
+    add_table(
+        doc,
+        [
+            "System",
+            "Method",
+            "Visits",
+            "Med. n",
+            "Med. T (ps)",
+            "Mean T (ps)",
+            "Med. max (ps)",
+            "P(T≥τ)",
+            "Occ. (%)",
+        ],
+        res_si,
+    )
+    add_caption(
+        doc,
+        "Table S7. Sojourn statistics in the production window W. Visits is the total number of "
+        "contiguous sojourns across n = 3 campaigns. Med. n is the median number of sojourns per "
+        "campaign. Med. T and mean T are medians, over campaigns that entered W, of that "
+        "campaign’s median and mean sojourn. Med. max is the median of the three longest "
+        "sojourns, including 0 for campaigns that never entered. P(T≥τ) is the mean over "
+        "campaigns of the fraction of sojourns that meet the production τ (empty campaigns "
+        "contribute 0). Occ. is production occupancy.",
+    )
+    win_rows = []
+    win_map = {}
+    with (ROOT / "tables" / "window_occupancy_summary.csv").open(encoding="utf-8") as fh:
+        for rec in csv.DictReader(fh):
+            win_map[(rec["system"], rec["method"], rec["x"])] = rec["median_occupancy"]
+    win_x = {
+        "CLN025": ["0.15", "0.2", "0.25", "0.3", "0.4"],
+        "AdK": ["-8.0", "-4.0", "0.0", "4.0", "8.0"],
+        "MBP": ["-2.0", "-1.0", "0.0", "1.0", "2.0"],
+    }
+    for sys in ("CLN025", "AdK", "MBP"):
+        methods = ["Random", "LAST", "Least-counts", "kNN-AS", "MOAS"] + (["TAPS"] if sys == "CLN025" else [])
+        for m in methods:
+            cells = []
+            for x in win_x[sys]:
+                v = win_map.get((sys, m, x))
+                if v in ("", None):
+                    cells.append("—")
+                else:
+                    cells.append(f"{float(v):.2f}")
+            win_rows.append([sys, m] + cells)
+    add_table(
+        doc,
+        ["System", "Method", "w−2", "w−1", "w₀", "w+1", "w+2"],
+        win_rows,
+    )
+    add_caption(
+        doc,
+        "Table S8. Median occupancy (%) under neighboring definitions of W. Columns w−2…w+2 "
+        "are RMSD cutoffs 0.15, 0.20, 0.25, 0.30, 0.40 nm for CLN025; LID/NMP margins −8, −4, "
+        "0, +4, +8 degrees for AdK; and MBP window expansions −2…+2 as defined in the text. "
+        "Production windows are w₀.",
     )
 
     add_h(doc, "S11. Campaign tags", 1)
@@ -1616,24 +2111,12 @@ def build_si():
     add_p(
         doc,
         "MBP analogously mbp_*, mbp_s1_*, mbp_s2_*. Ablation: mbp_nov, mbp_bnd, mbp_tgt, "
-        "mbp_novbnd, mbp_novtgt, mbp_bndtgt. Histories for campaigns that lived on "
-        "lan55 are copied under paper/data/hist_55.",
+        "mbp_novbnd, mbp_novtgt, mbp_bndtgt.",
         first_line=False,
         align="justify",
     )
 
-    add_h(doc, "S12. What is deliberately excluded", 1)
-    add_p(
-        doc,
-        "The lan55 AdK 1000 ns production tagged adk-r1 belongs to another manuscript and is "
-        "not included in any table or figure here. CLN025 moas_dynamic / moas_pareto / seed-3 "
-        "LAST-LC-TAPS campaigns exist on disk but are not part of the n = 3 main comparison. "
-        "Alanine dipeptide work in taps-gromacs is unrelated.",
-        first_line=False,
-        align="justify",
-    )
-
-    doc.save(OUT_SI)
+    save_watched(doc, OUT_SI)
     print("wrote", OUT_SI)
 
 

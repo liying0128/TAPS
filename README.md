@@ -2,6 +2,8 @@
 
 Multi-objective adaptive sampling (MOAS) for molecular dynamics, with GROMACS.
 
+**Data and software (JCTC / JCIM):** see [`SOFTWARE.md`](SOFTWARE.md) and [`paper/protocol/`](paper/protocol/). Ranking, CV windows, and commitment definitions used in the manuscript live there. License: [MIT](LICENSE). GitHub: https://github.com/liying0128/TAPS
+
 This repository holds **code, MDP templates, manuscript drafts, and method notes**. Production trajectories and checkpoints are not included (they are hundreds of gigabytes locally). See `paper/simulation_paths.md` for where those files live on the lab machines.
 
 ## Layout
